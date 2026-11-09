@@ -701,7 +701,7 @@ class ReviewApp(App):
         if not 0 <= index < len(seq):
             self.set_status("没有可查看的提交")
             return
-        sub = seq[index]
+        sub = page.context.get("history_selected") or seq[index]
         page.context["submission"] = sub
         cid = page.context["cid"]
         page.query_one("#frame").border_title = f"{sub.get('student', '')} · {sub.get('problem_index', '?')} · #{sub['submission_id']}"
@@ -764,6 +764,8 @@ class ReviewApp(App):
             hint = "a 新增 UID · e 编辑 · d 删除 · 空格启用/停用 · Ctrl+S 保存"
         if section == "比赛筛选":
             hint += "\na 新增正则（格式：白 正则 或 黑 正则） · e 编辑 · d 删除 · 空格切换 · Ctrl+S 保存"
+        if section in ("采集", "外观", "检测阈值", "比赛筛选", "人员名单"):
+            entries.append(({"action": "defaults"}, (self._paint("恢复本类默认设置"), "Enter 确认修改（Ctrl+S 保存）", "")))
         self._show(page, section + (" · 未保存" if self.settings_dirty else ""),
                    hint, ("设置", "值", "状态"), entries)
 
@@ -826,6 +828,9 @@ class ReviewApp(App):
         elif kind == "settings_section":
             if item.get("goto"):
                 self.push_page("account", "账户")
+            elif item.get("action") == "defaults":
+                self.reset_category(ctx["section"])
+                self.render_page(page)
             else:
                 self.edit_setting(item, 1, click=True)
         elif kind == "mark":
@@ -1114,6 +1119,7 @@ class ReviewApp(App):
             seq = page.context["sequence"]
             if seq:
                 page.context["index"] = (page.context["index"] + delta) % len(seq)
+                page.context.pop("history_selected", None)
                 self.render_page(page)
 
     def action_history_previous(self): self.move_history(-1)
@@ -1127,8 +1133,7 @@ class ReviewApp(App):
                    if s["problem_index"] == sub["problem_index"]]
         if not history: return
         position = next((i for i, row in enumerate(history) if row["submission_id"] == sub["submission_id"]), 0)
-        page.context["sequence"] = history
-        page.context["index"] = (position + delta) % len(history)
+        page.context["history_selected"] = history[(position + delta) % len(history)]
         self.render_page(page)
 
     def action_option_previous(self): self.adjust_option(-1)
@@ -1248,6 +1253,20 @@ class ReviewApp(App):
         except (OSError, ValueError, re.error) as e:
             self.set_status(f"保存失败：{e}")
             return False
+
+    def reset_category(self, section: str) -> None:
+        from review_settings import flatten, defaults
+        if section in SETTINGS_GROUPS:
+            for key in SETTINGS_GROUPS[section]:
+                self.settings_draft[key] = copy.deepcopy(DEFAULT_SETTINGS[key])
+        elif section == "比赛筛选":
+            self.filters_draft = copy.deepcopy(DEFAULT_FILTERS)
+        elif section == "人员名单":
+            self.staff_draft = []
+        elif section == "检测阈值":
+            self.thresholds_draft = flatten(defaults())
+        self.settings_dirty = True
+        self.set_status(f"{section} 已恢复默认（尚未保存）")
 
     def reset_drafts(self):
         self.settings_draft = copy.deepcopy(self.settings)
