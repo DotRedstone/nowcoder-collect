@@ -238,15 +238,131 @@ class ReviewApp(App):
         else:
             self.status("本地数据可离线使用 · 如需远程比赛请登录。")
 
-    def status(self, text):
-        self.query_one("#status", Static).update(" " + text)
+    def apply_theme(self, requested: str) -> None:
+        """Auto and wallpaper modes fall back cleanly to the terminal palette."""
+        if requested in ("auto", "wallpaper"):
+            theme, source = load_wallpaper_theme()
+            if theme:
+                self.register_theme(theme)
+                self._wallpaper_source = source
+                requested = theme.name
+            else:
+                self._wallpaper_source = ""
+                requested = "ansi-dark"
+        if requested not in self.available_themes:
+            requested = "ansi-dark"
+        self.theme = requested
+        if self.is_mounted:
+            self._update_pane_titles()
+            if self.cases:
+                self.filter_cases()
+            self.update_statusline()
 
-    def update_title(self):
-        contest = f"#{self.contest}" if self.contest is not None else "no contest"
-        findings = f"{len(self.cases)} findings" if self.cases else "no report"
-        self.query_one("#titlebar", Static).update(
-            f" ◈ nowcoder / review   ›  {contest}   ·   {findings}   |   1 contests  2 findings  3 inspect"
+    def status(self, message: str) -> None:
+        self._status_message = message
+        self.update_title()
+        self.update_statusline()
+
+    def update_title(self) -> None:
+        message = self._status_message or "ready"
+        header = Text(" ◈ nowcoder / review", style="bold")
+        header.append("  ·  ", style="dim")
+        header.append(message[:max(12, self.size.width - 30)], style="dim")
+        self.query_one("#titlebar", Static).update(header)
+
+    def _update_pane_titles(self) -> None:
+        if not self.is_mounted:
+            return
+        icons = ("󰒓", "󰀦", "󰆍") if self._nerd_font else ("◇", "◆", "▣")
+        panes = [self.query_one(name) for name in ("#left", "#middle", "#right")]
+        panes[0].border_title = f"{icons[0]} contests"
+        panes[0].border_subtitle = f"{len(self.contests)} 场"
+        level = self.FILTERS[self.filter_idx][1].lower()
+        panes[1].border_title = f"{icons[1]} findings · {level}"
+        index = 0
+        if self.filtered_cases and self.current in self.filtered_cases:
+            index = self.filtered_cases.index(self.current) + 1
+        panes[1].border_subtitle = f"{index}/{len(self.filtered_cases)}"
+        panes[2].border_title = f"{icons[2]} inspect"
+        panes[2].border_subtitle = (
+            f"{self.current.get('problem', '?')} · L3"
+            if self.current else "code / diff"
         )
+        self.query_one("#login-card").border_title = "󰌆  login / wechat" if self._nerd_font else "◈ login / wechat"
+
+    def _mode(self) -> tuple[str, str]:
+        if self.running:
+            return ("COLLECT" if getattr(self, "_job_kind", "collect") == "collect" else "ANALYZE", "warning")
+        if self.login_visible:
+            return ("LOGIN", "secondary")
+        if self.query_one("#command-row").display:
+            return ("COMMAND", "accent")
+        if self.query_one("#id-row").display or self.query_one("#search").display:
+            return ("INSERT", "accent")
+        return ("NORMAL", "success")
+
+    def update_statusline(self) -> None:
+        if not self.is_mounted:
+            return
+        self._spinner_tick += 1
+        mode, semantic = self._mode()
+        theme = self.current_theme
+        color = getattr(theme, semantic, None) or theme.accent or "#7aa2f7"
+        bg = theme.background or "#111111"
+        separator = "" if self._nerd_font else "▌"
+        label = ("◐◓◑◒"[self._spinner_tick % 4] + " ") if self.running else ""
+        left = Text()
+        left.append(f" {label}{mode} ", style=f"bold {bg} on {color}")
+        left.append(f"{separator} ", style=f"{color}")
+        cid = f"#{self.contest}" if self.contest is not None else "no contest"
+        active = ("contests", "findings", "inspect")[self.active_pane]
+        left.append(f" {cid} › {active}", style="bold")
+        right_text = " · ".join(filter(None, [
+            self._progress if self.running else "",
+            self.theme,
+            datetime.now().strftime("%H:%M"),
+        ]))
+        right = Text(" " + right_text + " ", style="dim")
+        width = max(0, self.size.width)
+        remaining = width - left.cell_len - right.cell_len
+        if remaining < 1:
+            right = Text(" " + datetime.now().strftime("%H:%M"), style="dim")
+            remaining = width - left.cell_len - right.cell_len
+        if remaining < 1:
+            # Let Textual clip the line, rather than wrap to a second row.
+            right = Text()
+            remaining = max(0, width - left.cell_len)
+        left.append(" " * remaining)
+        left.append_text(right)
+        self.query_one("#status", Static).update(left, layout=False)
+
+    def _render_empty(self) -> None:
+        empty = self.query_one("#empty", Static)
+        findings = self.query_one("#findings", DataTable)
+        if self.filtered_cases:
+            findings.display = True
+            empty.display = False
+            return
+        findings.display = False
+        empty.display = True
+        code_count = sum(int(c.get("codes", 0) or 0) for c in self.contests)
+        login = "已保存 Cookie" if read_secret(COOKIE_PATH) else "未登录 / 可离线使用"
+        logo = Text()
+        for line in ("   ▄▄  ▄▄", "  █  ██  █  nowcoder", "   ▀▀  ▀▀   review"):
+            logo.append(line + "\n", style=self.current_theme.accent or "cyan")
+        logo.append("\n  contests  ", style="dim")
+        logo.append(f"{len(self.contests)}\n")
+        logo.append("  codes     ", style="dim")
+        logo.append(f"{code_count}\n")
+        logo.append("  session   ", style="dim")
+        logo.append(login + "\n\n")
+        if not self.contests:
+            logo.append("  i 输入比赛 ID / l 登录\n  r 刷新在线比赛列表", style="dim")
+        elif not self.cases:
+            logo.append("  a 分析本地比赛\n  c 采集并分析", style="dim")
+        else:
+            logo.append("  没有匹配的线索\n  / 搜索 · f 切换过滤", style="dim")
+        empty.update(logo)
 
     def load_contests(self):
         try:
