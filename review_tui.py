@@ -64,7 +64,7 @@ class ReviewApp(App):
         self.contests = []
         self.contest = None
         self.cases = []
-        self.visible = []
+        self.filtered_cases = []
         self.current = None
         self.report = {}
         self.store = ReviewStore()
@@ -166,7 +166,7 @@ class ReviewApp(App):
             if event.data_table.id == "contests":
                 self.choose(idx)
             elif event.data_table.id == "findings":
-                self.preview(self.visible[idx])
+                self.preview(self.filtered_cases[idx])
         except (TypeError, ValueError, IndexError):
             return
 
@@ -181,7 +181,7 @@ class ReviewApp(App):
     def filter_cases(self):
         search = self.query_one("#search", Input).value.strip().casefold()
         level = self.query_one("#level", Select).value
-        self.visible = []
+        self.filtered_cases = []
         for case in self.cases:
             state = self.store.status(case_key(self.contest, "contest", case))
             text = f"{' '.join(case['pair'])} {case['problem']} {case['verdict']}".casefold()
@@ -189,14 +189,14 @@ class ReviewApp(App):
             if level == "high" and case["verdict"] not in ("实锤", "中偏强"): continue
             if level == "pending" and state != "待复核": continue
             if level == "reviewed" and state == "待复核": continue
-            self.visible.append(case)
+            self.filtered_cases.append(case)
         table = self.query_one("#findings", DataTable)
         table.clear()
-        for i, case in enumerate(self.visible):
+        for i, case in enumerate(self.filtered_cases):
             table.add_row(case["verdict"], str(case["problem"]), " ↔ ".join(case["pair"]),
                           f"{case['scores']['L3']:.2f}", self.store.status(case_key(self.contest, "contest", case)), key=str(i))
-        if self.visible:
-            self.preview(self.visible[0])
+        if self.filtered_cases:
+            self.preview(self.filtered_cases[0])
         else:
             self.current = None
             self.query_one("#evidence", Static).update("当前没有符合筛选条件的线索。")
