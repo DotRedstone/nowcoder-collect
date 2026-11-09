@@ -61,7 +61,7 @@ KEY_HELP = {
     "比赛": "Enter 打开 · c 采集并分析 · a 本地分析 · r 在线刷新 · F 规则外也显示",
     "线索": "Enter 证据 · f 过滤 · x 已核查 · d 无需跟进 · ! 需核实",
     "证据": "m 人员标记 · 1/2 看选手 · x/d/! 处理线索 · n/p 上/下一条",
-    "代码": "n/p 列表上一/下一份 · [/] 此人此题的历史 · m 给人打标",
+    "代码": "n/p 列表上一/下一份 · 方括号键 此人此题的历史 · m 给人打标",
     "设置": "h/l/←→ 切换选项 · 空格 开关 · a 新增 · e 编辑 · d 删除 · Ctrl+S 保存",
     "榜单": "←→ 修改剔除/标记策略 · e 导出 Markdown/CSV/HTML",
 }
@@ -427,7 +427,7 @@ class ReviewApp(App):
             "person": "Enter 源码   m 标记   h 返回",
             "problems": "Enter 题目   / 搜索   h 返回",
             "problem": "Enter 代码   h 返回",
-            "code": "n/p 切人   [/] 历史版本   m 标记",
+            "code": "n/p 切人   方括号键 历史版本   m 标记",
             "ranking": "←→ 策略   e 导出   h 返回",
             "settings": "Enter 设置分类   h 返回",
             "settings_section": "←→ 切换   Ctrl+S 保存   h 返回",
@@ -683,7 +683,7 @@ class ReviewApp(App):
             entries = [({"problem": item["problem"]}, (
                 self._paint(item["problem"]), item["title"], str(item["ac"]), str(item["submissions"])))
                 for item in items if not page.search or page.search.casefold() in (item["problem"] + item["title"]).casefold()]
-            self._show(page, "题目", "Enter 打开题目，按人浏览代表代码，再用 [/] 查看同一人的历史提交。",
+            self._show(page, "题目", "Enter 打开题目，按人浏览代表代码，再用 方括号键 查看同一人的历史提交。",
                        ("题号", "题目", "AC 人数", "提交"), entries)
         elif kind == "problem":
             problem = ctx["problem"]
