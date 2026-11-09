@@ -99,13 +99,26 @@ class Tui:
     def __init__(self, stdscr):
         self.scr = stdscr
         self.scr.keypad(True)
-        curses.curs_set(0)
-        curses.init_pair(1, curses.COLOR_RED, -1)
-        curses.init_pair(2, curses.COLOR_YELLOW, -1)
-        curses.init_pair(3, curses.COLOR_CYAN, -1)
-        curses.init_pair(4, curses.COLOR_WHITE, -1)
-        curses.init_pair(5, curses.COLOR_GREEN, -1)
-        curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_WHITE)
+        try:
+            curses.curs_set(0)
+        except curses.error:
+            pass  # 部分终端不支持隐藏光标
+        # 颜色初始化必须 start_color 先行；-1 默认背景需 use_default_colors
+        try:
+            curses.start_color()
+            try:
+                curses.use_default_colors()
+                bg = -1
+            except curses.error:
+                bg = curses.COLOR_BLACK
+            curses.init_pair(1, curses.COLOR_RED, bg)
+            curses.init_pair(2, curses.COLOR_YELLOW, bg)
+            curses.init_pair(3, curses.COLOR_CYAN, bg)
+            curses.init_pair(4, curses.COLOR_WHITE, bg)
+            curses.init_pair(5, curses.COLOR_GREEN, bg)
+            curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_WHITE)
+        except curses.error:
+            pass  # 无颜色终端，忽略
 
         self.cookie = read_cookie()
         self.uid = read_uid()
