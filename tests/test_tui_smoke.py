@@ -58,26 +58,10 @@ class ScreenTests(unittest.TestCase):
     def test_settings_and_user_mark_roundtrip(self):
         async def run():
             with tempfile.TemporaryDirectory() as directory:
-                with patch("review_tui.ReviewApp._load_user_data") as load:
-                    def init():
-                        from review_domain import DEFAULT_SETTINGS, DEFAULT_FILTERS
-                        from review_settings import load as thresholds_load
-                        import copy
-                        app.settings = copy.deepcopy(DEFAULT_SETTINGS)
-                        app.filters = copy.deepcopy(DEFAULT_FILTERS)
-                        app.staff = []
-                        app.people = PeopleStore(Path(directory) / "people.json")
-                        app.reviews = __import__("tui_backend").ReviewStore(Path(directory) / "reviews.json")
-                        app.thresholds = thresholds_load()
-                        app.settings_draft = copy.deepcopy(app.settings)
-                        app.filters_draft = copy.deepcopy(app.filters)
-                        app.staff_draft = []
-                        app.thresholds_draft = copy.deepcopy(app.thresholds)
-                        app.nerd_font = False
-                    # Set explicit mock on app instance instead of replacing constructor.
-                    load.side_effect = init
+                with patch("review_tui.PeopleStore", return_value=PeopleStore(Path(directory) / "people.json")), patch(
+                    "review_tui.ReviewStore", return_value=__import__("tui_backend").ReviewStore(Path(directory) / "reviews.json")
+                ):
                     app = ReviewApp()
-                    load.side_effect = None
                     async with app.run_test(size=(100, 30)) as pilot:
                         await pilot.pause()
                         app.push_page("mark", "人员标记", cid=5, targets=[11])
