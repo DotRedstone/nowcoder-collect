@@ -339,6 +339,55 @@ def load_report(contest_id: int, key: str, directory: Path = REPORTS_DIR) -> dic
         return None
     return data.get("report")
 
+RANK_SNAPSHOT_DIR = CONFIG_DIR / "ranking-source"
+
+def save_rank_snapshot(contest_id: int, db: Path, problems: list[dict],
+                       signup: dict, submissions: list[dict],
+                       directory: Path = RANK_SNAPSHOT_DIR) -> Path:
+    """Save official rank-source values, including zero-submit signups.
+
+    This is not an official certification; the source is Nowcoder's submit-list
+    response. Store only aggregated scores and UID/name, not credentials.
+    """
+    full = {int(p["problemId"]): float(p.get("score") or 0) for p in problems}
+    entries: dict[int, dict] = {
+        int(uid): {"uid": int(uid), "name": u.get("name") or str(uid),
+                   "total": 0.0, "ac": 0, "submissions": 0, "best": {}}
+        for uid, u in signup.items()}
+    for raw in submissions:
+        uid, pid = int(raw["uid"]), int(raw["problemId"])
+        row = entries.setdefault(uid, {
+            "uid": uid, "name": str(uid), "total": 0.0,
+            "ac": 0, "submissions": 0, "best": {},
+        })
+        row["submissions"] += 1
+        score = (full.get(pid, 0) if raw.get("status") == 5 else
+                 round(float(raw.get("rightCaseRate") or 0) * full.get(pid, 0), 2))
+        best = row["best"]
+        best[str(pid)] = max(float(best.get(str(pid), 0)), score)
+    records = []
+    for row in entries.values():
+        row["total"] = round(sum(row["best"].values()), 2)
+        row["ac"] = sum(float(score) >= full.get(int(pid), 0) - 1e-6
+                        for pid, score in row["best"].items())
+        del row["best"]
+        records.append(row)
+    records.sort(key=lambda row: (-row["total"], -row["ac"], row["name"]))
+    target = directory / f"{contest_id}.json"
+    payload = {"contest_id": int(contest_id), "db": str(db.expanduser().resolve()),
+               "rows": records, "source": "nowcoder-submit-list"}
+    _write_atomic(target, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    return target
+
+def rank_source_available(contest_id: int, db: Path = DB_PATH,
+                          directory: Path = RANK_SNAPSHOT_DIR) -> bool:
+    path = directory / f"{contest_id}.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data.get("db") == str(db.expanduser().resolve()) and data.get("contest_id") == int(contest_id)
+    except (OSError, ValueError):
+        return False
+
 def local_rank(contest_id: int, db: Path = DB_PATH) -> list[dict]:
     """IOI max(score per problem), same order as compute_rank.
 
@@ -346,6 +395,12 @@ def local_rank(contest_id: int, db: Path = DB_PATH) -> list[dict]:
     zero-submission signups are unavailable, so expose this as a provisional
     offline ranking rather than claiming equivalence to the official list.
     """
+    if rank_source_available(contest_id, db):
+        try:
+            raw = json.loads((RANK_SNAPSHOT_DIR / f"{contest_id}.json").read_text(encoding="utf-8"))
+            return [{**row, "rank": i} for i, row in enumerate(raw["rows"], 1)]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
     people = people_for_contest(contest_id, db)
     return [{**p, "rank": i} for i, p in enumerate(
         sorted(people, key=lambda p: (-p["total"], -p["ac"], p["name"])), 1)]
