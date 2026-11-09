@@ -241,6 +241,8 @@ class ReviewApp(App):
         Binding("ctrl+s", "save", "保存", show=False),
         Binding("ctrl+x", "cancel_task", "取消任务", show=False),
         Binding("t", "theme", "主题", show=False),
+        Binding("1", "evidence_a", "选手 A", show=False),
+        Binding("2", "evidence_b", "选手 B", show=False),
     ]
     def __init__(self) -> None:
         super().__init__()
@@ -528,9 +530,14 @@ class ReviewApp(App):
             summary = (
                 f"{case['verdict']} · 人工复核 {self.reviews.status(case_key(cid, 'contest', case))}\n"
                 f"L1 {scores.get('L1', 0):.3f}   L2 {scores.get('L2', 0):.3f}   L3 {scores.get('L3', 0):.3f}\n"
-                f"稀有指纹 {rare.get('shared', 0)} / {rare.get('score', 0):.3f}   模板比例 {case.get('template_ratio', 0):.3f}"
+                f"MD5 去空白相同：{('是' if scores.get('md5_ws_equal') else '否')} · 稀有指纹 {rare.get('shared', 0)} / {rare.get('score', 0):.3f}\n"
+            f"样例：{'、'.join(rare.get('samples', [])[:3])[:110] or '暂无'}\n"
+            f"模板比例 {case.get('template_ratio', 0):.3f}"
                 f"   Crowd {case.get('crowd_count', 0)}\n"
-                f"AC 时间差 {timeline.get('delta_seconds', '未知')} 秒   方向成立 {timeline.get('direction_valid', '未知')}\n"
+                f"AC 时间差 {timeline.get('delta_seconds', '未知')} 秒   首提交差 {timeline.get('first_submit_delta', '未知')} 秒\n"
+            f"先 AC：{timeline.get('who_first') or '未知'}   方向成立 {timeline.get('direction_valid', '未知')}\n"
+            f"后交者 AC 前失败 {timeline.get('later_failures_before_ac', 0)} 次 · "
+            f"{'、'.join(timeline.get('error_types', [])) or '—'}\n"
                 "x 已核查 · d 无需跟进 · ! 需核实 · m 给人标记"
             )
             page.query_one("#overview", Static).update(summary)
@@ -1011,7 +1018,12 @@ class ReviewApp(App):
             self.render_page(page)
 
     def action_review_ok(self): self.review_case("已核查")
-    def action_review_dismiss(self): self.review_case("无需跟进")
+    def action_review_dismiss(self):
+        page = self.current_page()
+        if page and page.kind == "settings_section":
+            self.action_delete()
+        else:
+            self.review_case("无需跟进")
     def action_review_followup(self): self.review_case("需进一步核实")
 
     def review_case(self, status: str) -> None:
@@ -1033,6 +1045,20 @@ class ReviewApp(App):
                 self.render_page(page)
         else:
             self.render_page(page)
+
+    def action_evidence_a(self):
+        self.person_from_evidence(0)
+
+    def action_evidence_b(self):
+        self.person_from_evidence(1)
+
+    def person_from_evidence(self, index: int):
+        page = self.current_page()
+        if not page or page.kind != "evidence": return
+        case = page.context["case"]
+        uid = int(case["student_ids"][index])
+        name = case["pair"][index]
+        self.push_page("person", name, cid=page.context["cid"], uid=uid, name=name)
 
     def action_mark_person(self):
         page = self.current_page()
@@ -1262,7 +1288,9 @@ class ReviewApp(App):
 
     def action_analyze(self):
         page = self.current_page()
-        if page and page.context.get("cid"):
+        if page and page.kind == "settings_section":
+            self.action_add()
+        elif page and page.context.get("cid"):
             self.launch(page.context["cid"], False)
 
     def action_collect(self):
