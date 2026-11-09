@@ -650,12 +650,13 @@ class ReviewApp(App):
                 if self.people_filter == 4 and not any(person["uid"] in x.get("student_ids", []) for x in self.report_for(cid).get("results", [])): continue
                 if page.search and page.search.casefold() not in (person["name"] + str(person["uid"])).casefold(): continue
                 entries.append(({"uid": person["uid"], "name": person["name"]}, (
+                    str(person.get("original_rank", "—")),
                     self._paint(person["name"], "dim" if person["staff"] else ""),
                     str(person["uid"]), str(person["ac"]), f"{person['total']:.2f}",
                     self._mark(person["uid"], cid))))
             self._show(page, "选手 · " + ("全部", "未看", "存疑", "作弊者", "有线索")[self.people_filter],
                 "含所有已采集参赛者；管理人员灰显排在末尾。Enter 看全部提交，m 给人打标。",
-                ("选手", "UID", "AC", "得分", "标记"), entries)
+                ("原榜", "选手", "UID", "AC", "得分", "标记"), entries)
         elif kind == "person":
             uid = ctx["uid"]
             subs = person_submissions(cid, uid, self.db())
