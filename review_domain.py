@@ -257,13 +257,35 @@ def people_for_contest(contest_id: int, db: Path = DB_PATH, staff: set[int] | No
             person["ac_problems"].add(s.get("problem_index"))
         key = s.get("problem_index") or ""
         person["best"][key] = max(float(s.get("score") or 0), person["best"].get(key, 0))
+    # A saved submit-list snapshot includes registered users with no submissions.
+    if rank_source_available(contest_id, db):
+        try:
+            source = json.loads((RANK_SNAPSHOT_DIR / f"{contest_id}.json").read_text(encoding="utf-8"))
+            for i, record in enumerate(source["rows"], 1):
+                uid = int(record["uid"])
+                if uid not in users:
+                    users[uid] = {
+                        "uid": uid, "name": record["name"],
+                        "submissions": 0, "ac_problems": set(), "best": {}
+                    }
+                users[uid]["original_rank"] = i
+                users[uid]["snapshot_total"] = record["total"]
+                users[uid]["snapshot_ac"] = record["ac"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
     result = []
     for person in users.values():
-        person["ac"] = len(person.pop("ac_problems"))
-        person["total"] = round(sum(person.pop("best").values()), 2)
+        person["ac"] = person.pop("snapshot_ac", len(person.pop("ac_problems")))
+        person["total"] = person.pop("snapshot_total", round(sum(person.pop("best").values()), 2))
+        person.pop("ac_problems", None)
+        person.pop("best", None)
         person["staff"] = person["uid"] in staff
         result.append(person)
-    return sorted(result, key=lambda p: (p["staff"], -p["total"], -p["ac"], p["name"]))
+    result.sort(key=lambda p: (p["staff"], -p["total"], -p["ac"], p["name"]))
+    if not any("original_rank" in p for p in result):
+        for i, person in enumerate(sorted(result, key=lambda p: (-p["total"], -p["ac"], p["name"])), 1):
+            person["original_rank"] = i
+    return result
 
 def problems_for_contest(contest_id: int, db: Path = DB_PATH) -> list[dict]:
     subs = all_submissions(contest_id, db)
