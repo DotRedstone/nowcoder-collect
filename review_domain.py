@@ -343,7 +343,7 @@ RANK_SNAPSHOT_DIR = CONFIG_DIR / "ranking-source"
 
 def save_rank_snapshot(contest_id: int, db: Path, problems: list[dict],
                        signup: dict, submissions: list[dict],
-                       directory: Path = RANK_SNAPSHOT_DIR) -> Path:
+                       directory: Path | None = None) -> Path:
     """Save official rank-source values, including zero-submit signups.
 
     This is not an official certification; the source is Nowcoder's submit-list
@@ -373,6 +373,7 @@ def save_rank_snapshot(contest_id: int, db: Path, problems: list[dict],
         del row["best"]
         records.append(row)
     records.sort(key=lambda row: (-row["total"], -row["ac"], row["name"]))
+    directory = directory if directory is not None else RANK_SNAPSHOT_DIR
     target = directory / f"{contest_id}.json"
     payload = {"contest_id": int(contest_id), "db": str(db.expanduser().resolve()),
                "rows": records, "source": "nowcoder-submit-list"}
@@ -380,7 +381,8 @@ def save_rank_snapshot(contest_id: int, db: Path, problems: list[dict],
     return target
 
 def rank_source_available(contest_id: int, db: Path = DB_PATH,
-                          directory: Path = RANK_SNAPSHOT_DIR) -> bool:
+                          directory: Path | None = None) -> bool:
+    directory = directory if directory is not None else RANK_SNAPSHOT_DIR
     path = directory / f"{contest_id}.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
