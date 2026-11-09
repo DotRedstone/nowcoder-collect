@@ -282,6 +282,7 @@ class ReviewApp(App):
         self._status = "本地数据就绪"
         self._task_mode = ""
         self._task_progress = ""
+        self._task_contest = None
         self.proc: subprocess.Popen | None = None
         self.running = False
         self.cancel_requested = False
@@ -438,7 +439,16 @@ class ReviewApp(App):
         bar.append(" " if self.nerd_font else "▌ ", style=color)
         where = f"#{page.context.get('cid', '—')} › {self.trail[-1]}"
         bar.append(where[:max(16, self.size.width - 42)], style="bold")
-        right = f"{self._task_progress}  " if self.running else ""
+        right = ""
+        if self.running:
+            label = self._task_progress
+            stage = re.search(r"阶段\s+(\d+)/(\d+)", label)
+            if stage:
+                done, count = map(int, stage.groups())
+                width = 10
+                progress = min(width, max(0, round(done / max(count, 1) * width)))
+                label = "━" * progress + "─" * (width - progress) + f" 阶段 {done}/{count}"
+            right = f"#{self._task_contest} {label}  "
         right += f"{self.theme} · {datetime.now().strftime('%H:%M')}"
         gap = max(1, self.size.width - bar.cell_len - Text(right).cell_len - 2)
         bar.append(" " * gap)
@@ -849,8 +859,11 @@ class ReviewApp(App):
             try:
                 validate_filters(self.filters_draft)
                 contests = merge_contests(local_contests(self.db()), self.remote)
-                match = [c["name"] for c in contests if contest_matches(c, self.filters_draft)]
-                hint = f"实时预览：命中 {len(match)}/{len(contests)} 场：" + "、".join(match[:4])
+                match = [c.get("name") or str(c["contest_id"]) for c in contests if contest_matches(c, self.filters_draft)]
+                excluded = [c.get("name") or str(c["contest_id"]) for c in contests if not contest_matches(c, self.filters_draft)]
+                hint = (f"实时预览：命中 {len(match)}/{len(contests)} 场\n"
+                        f"命中：{'、'.join(match[:4]) or '—'}\n"
+                        f"排除：{'、'.join(excluded[:4]) or '—'}")
             except re.error as e:
                 hint = f"正则错误：{e}"
             except ValueError as e:
@@ -1546,6 +1559,7 @@ class ReviewApp(App):
         self.running = True
         self.cancel_requested = False
         self._task_mode = "COLLECT" if collect else "ANALYZE"
+        self._task_contest = cid
         self._task_progress = "启动中"
         self.set_status(f"比赛 #{cid} 已提交后台任务，仍可继续浏览")
         self.job_worker(cid, collect, self.staff_ids(), self.db(), self.settings.copy())
@@ -1620,6 +1634,7 @@ class ReviewApp(App):
         self.proc = None
         self._task_progress = ""
         self._task_mode = ""
+        self._task_contest = None
         self.cancel_requested = False
         if error:
             self.set_status(f"任务未完成：{error}")
