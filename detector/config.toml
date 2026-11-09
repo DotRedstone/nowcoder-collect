@@ -1,0 +1,18 @@
+# 牛客代码雷同检测器 配置（去 LLM 化，纯规则）
+version = "1.0.0"
+
+[ngram]
+k = 5                  # n-gram 窗口大小
+rare_threshold = 3     # 稀有 n-gram：被 <=3 个不同学生使用才算"稀有"
+
+[thresholds]
+solid_l2 = 0.98             # 实锤：L2 去空白相似度达到该值
+solid_delta_seconds = 1800  # 实锤：两人 AC 时间差（秒）小于该值
+mid_strong_rare = 0.5
+mid_strong_l3 = 0.85
+suspicious_l3 = 0.8
+suspicious_rare = 0.3
+
+[template]
+global_ratio = 0.7        # 被 >=70% 学生使用的 n-gram 视为"题目模板"，从相似度计算中排除
+crowd_threshold = 3       # 同一份代码被 >=3 个不同学生写，视为"人群模板"（套路），不是抄袭

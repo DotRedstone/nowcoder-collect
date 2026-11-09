@@ -21,6 +21,11 @@ nowcoder-collect/
 │   ├── content/
 │   └── popup/
 ├── install.sh                    # 一键安装 skill
+├── detector/                     # 去 LLM 化的确定性雷同检测器（纯标准库）
+│   ├── main.py                   #   python main.py --contest 143786
+│   ├── config.toml               #   阈值配置
+│   ├── detectors/                #   preprocess/normalize/similarity/template/timeline/classify
+│   └── tests/                    #   单元 + 回归测试
 ├── LICENSE
 └── README.md
 ```
