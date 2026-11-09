@@ -109,6 +109,7 @@ class Tui:
     def __init__(self, stdscr):
         self.scr = stdscr
         self.scr.keypad(True)
+        self.scr.timeout(100)  # getch 超时 100ms，让进度条/状态能实时刷新，不阻塞
         try:
             curses.curs_set(0)
         except curses.error:
@@ -371,7 +372,8 @@ class Tui:
                 self.draw_login()
             self.scr.refresh()
             key = self.scr.getch()
-            self.handle(key)
+            if key != -1:
+                self.handle(key)
             if self.state == "quit":
                 break
 
