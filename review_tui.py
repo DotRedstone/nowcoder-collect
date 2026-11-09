@@ -21,7 +21,7 @@ from textual.widgets import DataTable, Input, Static, TabbedContent, TabPane, Te
 
 from tui_backend import COOKIE_PATH, UID_PATH, DB_PATH, REVIEW_PATH, ReviewStore, case_key, local_contests, merge_contests, pair_sources, read_secret, write_secret
 import login
-from rice_theme import load_wallpaper_theme
+from rice_theme import candidate_paths, load_wallpaper_theme
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "skill/scripts"))
@@ -75,7 +75,7 @@ class ReviewApp(App):
     }
     .pane {
         height: 1fr; min-width: 18;
-        border: round $panel; margin: 0 0 0 1;
+        border: round $text-muted 40%; margin: 0 0 0 1;
         padding: 0 1; background: $background;
         border-title-color: $text-muted;
         border-title-style: bold;
@@ -212,6 +212,8 @@ class ReviewApp(App):
         self._progress = ""
         self._spinner_tick = 0
         self._wallpaper_source = ""
+        self._wallpaper_signature = None
+        self._watch_wallpaper = False
         self._nerd_font = os.environ.get("NOWCODER_NERD_FONT", "0") == "1"
         self._help_visible = False
 
@@ -262,6 +264,7 @@ class ReviewApp(App):
         self.load_contests()
         self.apply_layout()
         self.set_interval(1.0, self.update_statusline)
+        self.set_interval(4.0, self.poll_wallpaper)
         self.update_statusline()
         self.query_one("#contests", DataTable).focus()
         if read_secret(COOKIE_PATH):
@@ -279,15 +282,18 @@ class ReviewApp(App):
         return value
 
     def apply_theme(self, requested: str) -> None:
-        """Auto and wallpaper modes fall back cleanly to the terminal palette."""
-        if requested in ("auto", "wallpaper"):
+        """Auto tracks generated JSON; fixed themes do not change unexpectedly."""
+        self._watch_wallpaper = requested in ("auto", "wallpaper")
+        self._wallpaper_source = ""
+        self._wallpaper_signature = None
+        if self._watch_wallpaper:
             theme, source = load_wallpaper_theme()
             if theme:
                 self.register_theme(theme)
                 self._wallpaper_source = source
                 requested = theme.name
+                self._wallpaper_signature = self._source_signature(source)
             else:
-                self._wallpaper_source = ""
                 requested = "ansi-dark"
         if requested not in self.available_themes:
             requested = "ansi-dark"
@@ -297,6 +303,38 @@ class ReviewApp(App):
             if self.cases:
                 self.filter_cases()
             self.update_statusline()
+
+    @staticmethod
+    def _source_signature(path: str) -> tuple[str, int, int] | None:
+        try:
+            st = Path(path).stat()
+            return (path, st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
+
+    def poll_wallpaper(self) -> None:
+        """Detect atomic file rewrites without keeping a filesystem watcher open."""
+        if not self._watch_wallpaper:
+            return
+        paths = candidate_paths()
+        source = next((str(p) for p in paths if p.is_file()), "")
+        signature = self._source_signature(source) if source else None
+        if signature == self._wallpaper_signature:
+            return
+        theme, valid_source = load_wallpaper_theme()
+        if not theme:
+            # During atomic writes keep the previous palette; retry next poll.
+            return
+        self._wallpaper_signature = self._source_signature(valid_source)
+        self._wallpaper_source = valid_source
+        self.register_theme(theme)
+        if self.theme == theme.name:
+            self.theme = "ansi-dark"
+        self.theme = theme.name
+        self._update_pane_titles()
+        if self.cases:
+            self.filter_cases()
+        self.status(f"配色已同步：{Path(valid_source).name}")
 
     def status(self, message: str) -> None:
         self._status_message = message
@@ -318,11 +356,8 @@ class ReviewApp(App):
         panes[0].border_title = f"{icons[0]} contests"
         panes[0].border_subtitle = f"{len(self.contests)} 场"
         level = self.FILTERS[self.filter_idx][1].lower()
-        panes[1].border_title = f"{icons[1]} findings · {level}"
-        index = 0
-        if self.filtered_cases and self.current in self.filtered_cases:
-            index = self.filtered_cases.index(self.current) + 1
-        panes[1].border_subtitle = f"{index}/{len(self.filtered_cases)}"
+        panes[1].border_title = f"{icons[1]} findings · {level} {len(self.filtered_cases)}"
+        panes[1].border_subtitle = f"{len(self.filtered_cases)}/{len(self.cases)}"
         panes[2].border_title = f"{icons[2]} inspect"
         panes[2].border_subtitle = (
             f"{self.current.get('problem', '?')} · L3"
