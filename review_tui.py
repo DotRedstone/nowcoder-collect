@@ -40,6 +40,7 @@ class ReviewApp(App):
     #evidence { height: 12; padding: 1; overflow-y: auto; }
     #codes { height: 1fr; }
     TextArea { height: 1fr; }
+    #code-a, #code-b { width: 1fr; }
     #status { height: 3; padding: 0 2; background: $panel; content-align-vertical: middle; }
     #login-panel { display: none; height: 1fr; padding: 1 3; }
     #qr { height: 1fr; overflow-y: auto; }
@@ -99,11 +100,11 @@ class ReviewApp(App):
                 yield Label("证据 / Evidence")
                 yield Static("选择比赛并分析本地数据，或先采集。", id="evidence")
                 with TabbedContent(id="codes"):
-                    with TabPane("代码 A"):
-                        yield TextArea("", id="code-a", read_only=True, show_line_numbers=True)
-                    with TabPane("代码 B"):
-                        yield TextArea("", id="code-b", read_only=True, show_line_numbers=True)
-                    with TabPane("Diff"):
+                    with TabPane("并排源码"):
+                        with Horizontal():
+                            yield TextArea("", id="code-a", read_only=True, show_line_numbers=True)
+                            yield TextArea("", id="code-b", read_only=True, show_line_numbers=True)
+                    with TabPane("统一 Diff"):
                         yield TextArea("", id="diff", read_only=True, show_line_numbers=True)
                 with Horizontal(id="review-buttons"):
                     yield Button("已核查", id="review")
