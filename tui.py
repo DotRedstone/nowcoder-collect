@@ -254,6 +254,9 @@ class Tui:
 
     # ---- 主循环 ----
     def run(self):
+        # 一个命令启动：没有 Cookie 就直接进入扫码登录，登录完自动回到主菜单
+        if not self.cookie:
+            self.start_login()
         while True:
             if self.state == "menu":
                 self.draw_menu()
@@ -427,6 +430,9 @@ class Tui:
             self.scr.addstr(i, 0, ln[: self.w() - 1])
         self.scr.addstr(h - 2, 0, ("状态：" + (self.login_status or ""))[: self.w() - 1])
         self.footer(["q 取消返回"])
+
+
+def main(stdscr):
     Tui(stdscr).run()
 
 

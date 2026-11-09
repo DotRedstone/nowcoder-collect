@@ -7,9 +7,7 @@
 ```bash
 git clone https://github.com/DotRedstone/nowcoder-collect.git
 cd nowcoder-collect
-
-python3 login.py    # ① 终端扫码登录：显示二维码，微信扫一扫自动保存 Cookie
-python3 tui.py      # ② 打开面板：选比赛 → 爬取 → 分析 → 结果/榜单
+./run.sh            # 一个命令启动：没登录会自动弹二维码扫码登录，然后进面板
 ```
 
 ## 使用流程
