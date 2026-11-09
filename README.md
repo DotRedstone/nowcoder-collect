@@ -24,7 +24,7 @@ python -m pip install -r requirements-tui.txt
 
 ## 新工作区
 
-- **左栏比赛**：同时显示 SQLite 本地比赛与在线最近参加的比赛。无需联网即可读取已采集比赛。
+- **左栏比赛**：同时显示 SQLite 本地比赛与在线最近参加的比赛。无需联网即可读取已采集比赛。顶部可直接输入比赛 ID 打开未参加的比赛。
 - **中栏线索**：按参赛者、题号、检测等级搜索，按高优先级和人工复核状态筛选。
 - **右栏证据**：同时查看三种相似度、稀有指纹、提交时间线，以及用于检测的两份代表代码、统一差异视图。
 - **人工复核**：提供“已核查 / 无需跟进 / 需进一步核实”状态，独立保存在 `~/.dsh/nowcoder/reviews.json`，不会写回原比赛数据或改变检测算法结论。
@@ -32,7 +32,7 @@ python -m pip install -r requirements-tui.txt
 
 快速键：`Tab` 切焦点、`↑↓` 移动、`/` 搜索、`a` 本地分析、`c` 采集后分析、`r` 在线刷新、`Ctrl+T` 登录、`Ctrl+X` 取消任务、`?` 帮助、`q` 退出。界面按钮同样支持点击。
 
-首次登录：点击“账户 / 扫码” → “开始扫码”并用微信确认；Cookie 存于 `~/.dsh/nowcoder/cookie.txt`。在线最近比赛列表还需要用户 UID，保存在 `~/.dsh/nowcoder/uid.txt`。请勿提交 Cookie、UID 或私人审查记录。
+首次登录：点击“账户 / 扫码” → “开始扫码”并用微信确认；Cookie 存于 `~/.dsh/nowcoder/cookie.txt`。在线最近比赛列表还需要用户 UID，可在账户页面填写（从牛客个人主页地址获取），保存在 `~/.dsh/nowcoder/uid.txt`。请勿提交 Cookie、UID 或私人审查记录。
 
 数据库：`~/.dsh/nowcoder/nowcoder.db`；采集输出：`~/nowcoder-data/<比赛ID>/`。旧数据格式保持兼容。
 
@@ -40,7 +40,7 @@ python -m pip install -r requirements-tui.txt
 
 ```bash
 python3 detector/main.py --contest 143786 --json-out report.json
-python3 -m unittest discover -s detector/tests -v
+(cd detector && python3 -m unittest discover -s tests -v)
 python3 -m unittest discover -s tests -v
 ```
 
