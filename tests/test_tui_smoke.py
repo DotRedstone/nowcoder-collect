@@ -1,125 +1,95 @@
-"""Headless Textual tests for rice layout, offline use and keyboard navigation."""
+"""Headless Screen-stack and review flow tests (no network or private data)."""
 import asyncio
-import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from review_tui import ReviewApp
-from tui_backend import ReviewStore
+from review_tui import ReviewApp, Page
+from review_domain import PeopleStore
 
-
-class SmokeTests(unittest.TestCase):
-    def test_app_mounts_offline_with_help_overlay_and_statusline(self):
+class ScreenTests(unittest.TestCase):
+    def test_home_to_contest_to_people_to_code_and_back(self):
         async def run():
-            with patch("review_tui.read_secret", return_value=""), patch(
-                "review_tui.local_contests", return_value=[]
-            ):
-                app = ReviewApp()
-                async with app.run_test(size=(140, 42)) as pilot:
-                    await pilot.pause()
-                    self.assertIsNone(app.contest)
-                    self.assertEqual(app.query_one("#contests").row_count, 0)
-                    self.assertTrue(app.query_one("#empty").display)
-                    self.assertIn("contests", app.query_one("#left").border_title)
-                    self.assertIn("NORMAL", str(app.query_one("#status").render()))
-                    self.assertTrue(app.query_one("#status").styles.height.value == 1)
-                    app.action_help()
-                    await pilot.pause()
-                    self.assertEqual(app.screen.__class__.__name__, "HelpScreen")
-                    self.assertIsNotNone(app.screen.query_one("#help-card"))
-                    app.screen.dismiss()
-                    await pilot.pause()
-        asyncio.run(run())
-
-    def test_contest_workflow_focus_filter_and_theme(self):
-        async def run():
-            with tempfile.TemporaryDirectory() as tmp:
-                with patch("review_tui.read_secret", return_value=""), patch(
-                    "review_tui.local_contests", return_value=[
-                        {"contest_id": 123, "name": "训练赛", "submissions": 2, "codes": 2}
-                    ]
-                ), patch("review_tui.ReviewStore", return_value=ReviewStore(Path(tmp) / "reviews.json")):
+            with tempfile.TemporaryDirectory() as directory:
+                db = Path(directory) / "fake.db"
+                with patch("review_tui.local_contests", return_value=[{
+                    "contest_id": 5, "name": "校内周赛",
+                    "submissions": 1, "codes": 1}]), patch(
+                    "review_tui.read_secret", return_value=""
+                ), patch("review_tui.all_submissions", return_value=[]), patch(
+                    "review_tui.people_for_contest", return_value=[
+                    {"uid": 11, "name": "张三", "ac": 1, "total": 100, "staff": False}
+                ]), patch("review_tui.person_submissions", return_value=[
+                    {"submission_id": 101, "contest_id": 5, "student_id": 11,
+                     "student": "张三", "problem_index": "A", "problem_title": "求和",
+                     "phase": "contest", "submit_time": 1000, "score": 100,
+                     "verdict": "答案正确", "language": "C++", "code": "int main(){}",
+                     "loc": 1}
+                ]), patch("review_tui.ReviewApp.db", return_value=db):
                     app = ReviewApp()
-                    async with app.run_test(size=(140, 42)) as pilot:
+                    async with app.run_test(size=(105, 32)) as pilot:
                         await pilot.pause()
-                        self.assertEqual(app.contest, 123)
-                        self.assertEqual(app.query_one("#contests").row_count, 1)
-                        self.assertIn("1 场", app.query_one("#left").border_subtitle)
-                        app.focus_pane(1)
-                        self.assertEqual(app.active_pane, 1)
-                        app.action_filter()
-                        self.assertEqual(app.filter_idx, 1)
-                        self.assertIn("high", app.query_one("#middle").border_title)
-                        app.execute_command("contest 456")
-                        self.assertEqual(app.contest, 456)
-                        app.execute_command("theme ansi-dark")
-                        self.assertEqual(app.theme, "ansi-dark")
-                        app.action_toggle_login()
-                        self.assertTrue(app.login_visible)
+                        self.assertEqual(app.screen.kind, "home")
+                        self.assertEqual(len(app.screen.rows), 5)
+                        app.action_enter()
+                        await pilot.pause()
+                        self.assertEqual(app.screen.kind, "contests")
+                        app.action_enter()
+                        await pilot.pause()
+                        self.assertEqual(app.screen.kind, "contest")
+                        app.screen.query_one("#list").move_cursor(row=1)
+                        await pilot.pause()
+                        app.action_enter()
+                        await pilot.pause()
+                        self.assertEqual(app.screen.kind, "people")
+                        app.action_enter()
+                        await pilot.pause()
+                        self.assertEqual(app.screen.kind, "person")
+                        app.action_enter()
+                        await pilot.pause()
+                        self.assertEqual(app.screen.kind, "code")
+                        self.assertIn("int main()", app.screen.query_one("#code").text)
                         app.action_back()
-                        self.assertFalse(app.login_visible)
+                        await pilot.pause()
+                        self.assertEqual(app.screen.kind, "person")
         asyncio.run(run())
 
-    def test_risk_cells_and_narrow_panes(self):
+    def test_settings_and_user_mark_roundtrip(self):
         async def run():
-            with patch("review_tui.read_secret", return_value=""), patch(
-                "review_tui.local_contests", return_value=[
-                    {"contest_id": 123, "name": "测试", "submissions": 2, "codes": 2}
-                ]
-            ):
-                app = ReviewApp()
-                async with app.run_test(size=(72, 26)) as pilot:
-                    await pilot.pause()
-                    app.focus_pane(1)
-                    self.assertTrue(app.query_one("#middle").display)
-                    self.assertFalse(app.query_one("#left").display)
-                    result = {
-                        "pair": ["张三", "李四"], "student_ids": [1, 2],
-                        "problem": "B", "language": "cpp", "verdict": "中偏强",
-                        "scores": {"L1": 0.7, "L2": 0.8, "L3": 0.95},
-                        "rare": {"shared": 4, "score": 0.75},
-                        "timeline": {},
-                    }
-                    app.cases = [result]
-                    app.filter_idx = 0
-                    app.filter_cases()
-                    await pilot.pause()
-                    self.assertEqual(app.query_one("#findings").row_count, 1)
-                    self.assertIn("MED", app._risk_cell(result, True).plain)
-                    self.assertIn("▎", app._risk_cell(result, True).plain)
-                    self.assertIn("1/1", app.query_one("#middle").border_subtitle)
-        asyncio.run(run())
-
-
-    def test_wallpaper_theme_reloads_on_json_change(self):
-        async def run():
-            with tempfile.TemporaryDirectory() as tmp:
-                path = Path(tmp) / "colors.json"
-                def write(primary):
-                    path.write_text(json.dumps({
-                        "special": {"background": "#101010", "foreground": "#eeeeee"},
-                        "colors": {"color4": primary, "color5": "#d783d7"}
-                    }))
-                write("#5588bb")
-                with patch.dict(os.environ, {
-                    "NOWCODER_THEME": "auto", "NOWCODER_THEME_FILE": str(path),
-                }), patch("review_tui.read_secret", return_value=""), patch(
-                    "review_tui.local_contests", return_value=[]
-                ):
+            with tempfile.TemporaryDirectory() as directory:
+                with patch("review_tui.ReviewApp._load_user_data") as load:
+                    def init():
+                        from review_domain import DEFAULT_SETTINGS, DEFAULT_FILTERS
+                        from review_settings import load as thresholds_load
+                        import copy
+                        app.settings = copy.deepcopy(DEFAULT_SETTINGS)
+                        app.filters = copy.deepcopy(DEFAULT_FILTERS)
+                        app.staff = []
+                        app.people = PeopleStore(Path(directory) / "people.json")
+                        app.reviews = __import__("tui_backend").ReviewStore(Path(directory) / "reviews.json")
+                        app.thresholds = thresholds_load()
+                        app.settings_draft = copy.deepcopy(app.settings)
+                        app.filters_draft = copy.deepcopy(app.filters)
+                        app.staff_draft = []
+                        app.thresholds_draft = copy.deepcopy(app.thresholds)
+                        app.nerd_font = False
+                    # Set explicit mock on app instance instead of replacing constructor.
+                    load.side_effect = init
                     app = ReviewApp()
-                    async with app.run_test(size=(115, 36)) as pilot:
+                    load.side_effect = None
+                    async with app.run_test(size=(100, 30)) as pilot:
                         await pilot.pause()
-                        self.assertEqual(app.theme, "wallpaper")
-                        self.assertEqual(app.current_theme.primary, "#5588bb")
-                        original = path.stat().st_mtime_ns
-                        write("#bb7755")
-                        os.utime(path, ns=(original + 2_000_000_000, original + 2_000_000_000))
-                        app.poll_wallpaper()
+                        app.push_page("mark", "人员标记", cid=5, targets=[11])
                         await pilot.pause()
-                        self.assertEqual(app.current_theme.primary, "#bb7755")
+                        self.assertEqual(app.screen.kind, "mark")
+                        app.action_enter()
+                        await pilot.pause()
+                        page = app.screen
+                        self.assertTrue(page.query_one("#input-row").display)
+                        app.submit_input(page, "value", "已手动复核")
+                        await pilot.pause()
+                        self.assertEqual(app.people.get(5, 11)["mark"], "normal")
         asyncio.run(run())
 
 
