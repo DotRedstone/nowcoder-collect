@@ -388,6 +388,14 @@ class ReviewApp(App):
         else:
             page.query_one("#crumb", Static).update(" › ".join(("nowcoder", *self.trail)))
 
+    def _contests(self) -> list[dict]:
+        try:
+            rows = merge_contests(local_contests(self.db()), self.remote)
+            return [row for row in rows if contest_matches(row, self.filters)]
+        except (OSError, ValueError, re.error) as error:
+            self._status = f"比赛筛选失败：{error}"
+            return []
+
     def db(self) -> Path:
         return Path(self.settings.get("db_path", str(DB_PATH))).expanduser()
 
