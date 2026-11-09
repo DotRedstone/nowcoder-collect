@@ -34,6 +34,7 @@ from review_domain import (
     PeopleStore, all_submissions, contest_matches, detector_db, export_ranking, final_rank,
     hidden_uids, load_filters, load_report, load_settings, load_staff, local_rank,
     people_for_contest, person_submissions, problem_submissions, problems_for_contest,
+    rank_source_available,
     representative_for, representatives_by_problem, report_key, save_filters, save_report,
     save_settings, save_staff, validate_filters, validate_setting, SCHEMA, RANK_POLICY,
 )
@@ -664,9 +665,12 @@ class ReviewApp(App):
                 for r in self.report_for(cid).get("results", []))
             unreviewed = sum(not self.people.get(cid, p["uid"]).get("mark") or
                 self.people.get(cid, p["uid"]).get("mark") == "unreviewed" for p in rank if p["uid"] not in self.staff_ids())
-            self._show(page, "最终排行榜 · 本地推算",
+            official_source = rank_source_available(cid, self.db())
+            self._show(page, "最终排行榜 · " + ("官方同源快照" if official_source else "本地推算"),
                 f"⚠ 未处理线索 {unanswered} 条，未审人员 {unreviewed} 人；不阻止导出。\n"
-                "本地缺少官方报名零提交者与满分元数据，排名为可复核的离线推算。\n"
+                + ("成绩使用采集时保存的官方 submit-list 源数据；仍须人工复核。\n"
+                   if official_source else
+                   "⚠ 缺少官方报名零提交者与满分元数据，当前是本地推算，可能与官方榜不同。\n")
                 "在前四个选项上按 ←/→ 调整；按 e 导出。",
                 ("名次/选项", "姓名/设置", "得分/说明"), entries)
         elif kind == "pending":
