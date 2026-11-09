@@ -378,6 +378,8 @@ class ReviewApp(App):
             self.contest = None
         if self.contest is None and self.contests:
             self.choose(self.contests[0]["contest_id"])
+        self._update_pane_titles()
+        self._render_empty()
 
     def choose(self, cid):
         if cid == self.contest:
@@ -387,10 +389,12 @@ class ReviewApp(App):
         self.cases = []
         self.current = None
         self.query_one("#findings", DataTable).clear()
-        self.query_one("#evidence", Static).update(f"已选择比赛 #{cid}\n按 a 检测数据库 · 按 c 抓取后检测")
+        self.query_one("#evidence", Static).update(f"比赛 #{cid}\n按 a 分析本地数据 · 按 c 采集并分析")
         for name in ("#code-a", "#code-b", "#diff"):
             self.query_one(name, TextArea).load_text("")
         self.update_title()
+        self._update_pane_titles()
+        self._render_empty()
         self.status(f"比赛 #{cid} · a 本地分析 · c 采集 · r 在线刷新")
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted):
@@ -402,9 +406,48 @@ class ReviewApp(App):
             if event.data_table.id == "contests":
                 self.choose(idx)
             elif event.data_table.id == "findings":
-                self.preview(self.filtered_cases[idx])
+                table = self.query_one("#findings", DataTable)
+                first = table.ordered_columns[0].key
+                previous = self._selected_finding
+                self._selected_finding = idx
+                if previous is not None and previous != idx and previous < len(self.filtered_cases):
+                    table.update_cell(str(previous), first, self._risk_cell(self.filtered_cases[previous], False))
+                if 0 <= idx < len(self.filtered_cases):
+                    table.update_cell(str(idx), first, self._risk_cell(self.filtered_cases[idx], True))
+                    self.preview(self.filtered_cases[idx])
         except (TypeError, ValueError, IndexError):
             return
+
+    def _risk_cell(self, case: dict, selected: bool = False) -> Text:
+        verdict = case.get("verdict", "")
+        severity = {
+            "实锤": ("HIGH", self.current_theme.error),
+            "中偏强": ("MED", self.current_theme.warning),
+            "存疑": ("LOW", self.current_theme.foreground),
+        }
+        label, color = severity.get(verdict, ("—", self.current_theme.foreground))
+        color = color or "#aaaaaa"
+        l3 = float(case.get("scores", {}).get("L3", 0) or 0)
+        n = max(0, min(4, round(l3 * 4)))
+        marker = Text("▎" if selected else " ")
+        marker.stylize(self.current_theme.accent or "cyan")
+        marker.append("● ", style=f"bold {color}" if label != "LOW" else "dim")
+        marker.append(label + " ", style=f"{color}" if label != "LOW" else "dim")
+        marker.append("▮" * n + "▯" * (4 - n), style=color)
+        return marker
+
+    def _review_cell(self, state: str) -> Text:
+        style = {
+            "已核查": str(self.current_theme.success or "green"),
+            "需进一步核实": "magenta",
+            "无需跟进": "dim",
+            "待复核": "dim",
+        }.get(state, "dim")
+        label = {
+            "已核查": "✓ 已核查", "需进一步核实": "◆ 待核实",
+            "无需跟进": "— 无需跟进", "待复核": "· 待复核",
+        }.get(state, state)
+        return Text(label, style=style)
 
     def on_input_changed(self, event: Input.Changed):
         if event.input.id == "search":
@@ -416,25 +459,41 @@ class ReviewApp(App):
         self.filtered_cases = []
         for case in self.cases:
             state = self.store.status(case_key(self.contest, "contest", case))
-            text = f"{' '.join(case['pair'])} {case['problem']} {case['verdict']}".casefold()
-            if search and search not in text: continue
-            if level == "high" and case["verdict"] not in ("实锤", "中偏强"): continue
-            if level == "pending" and state != "待复核": continue
-            if level == "reviewed" and state == "待复核": continue
+            haystack = f"{' '.join(case['pair'])} {case['problem']} {case['verdict']}".casefold()
+            if search and search not in haystack:
+                continue
+            if level == "high" and case["verdict"] not in ("实锤", "中偏强"):
+                continue
+            if level == "pending" and state != "待复核":
+                continue
+            if level == "reviewed" and state == "待复核":
+                continue
             self.filtered_cases.append(case)
         table = self.query_one("#findings", DataTable)
         table.clear()
+        self._selected_finding = None
         for i, case in enumerate(self.filtered_cases):
-            table.add_row(case["verdict"], str(case["problem"]), " ↔ ".join(case["pair"]),
-                          f"{case['scores']['L3']:.2f}", self.store.status(case_key(self.contest, "contest", case)), key=str(i))
+            state = self.store.status(case_key(self.contest, "contest", case))
+            table.add_row(
+                self._risk_cell(case, selected=i == 0),
+                str(case["problem"]),
+                " ↔ ".join(case["pair"]),
+                f"{float(case.get('scores', {}).get('L3', 0)):>4.2f}",
+                self._review_cell(state), key=str(i),
+            )
         if self.filtered_cases:
+            self._selected_finding = 0
             self.preview(self.filtered_cases[0])
         else:
             self.current = None
-            self.query_one("#evidence", Static).update("当前没有符合筛选条件的线索。")
+            self.query_one("#evidence", Static).update(
+                "当前筛选条件下没有线索。" if self.cases else "尚未分析比赛 · a 分析 / c 采集")
+        self._render_empty()
+        self._update_pane_titles()
 
     def preview(self, case):
         self.current = case
+        self._update_pane_titles()
         key = case_key(self.contest, "contest", case)
         scores = case.get("scores", {})
         rare = case.get("rare", {})
