@@ -612,6 +612,20 @@ def extract(cookie, contest_id, out_dir, phase, db_path, threads):
     with open(os.path.join(base, "排名.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(rank))
 
+    # 保存官方同源的榜单计算输入（含零提交报名者），只用于本机离线审核。
+    # 该缓存不含 Cookie、源码或敏感请求头；文件权限由 review_domain 控制。
+    try:
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parents[2]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        from review_domain import save_rank_snapshot
+        save_rank_snapshot(int(contest_id),
+                           Path(db_path or "~/.dsh/nowcoder/nowcoder.db").expanduser(),
+                           problems, signup, rank_subs)
+    except (OSError, ValueError, ImportError) as exc:
+        print(f"      榜单离线缓存失败（采集结果不受影响）：{exc}", file=sys.stderr)
+
     print(f"[5/5] 完成 → {base}  |  DB: {db_path}", file=sys.stderr)
     print(json.dumps({"ok": True, "contestId": contest_id, "name": name,
                       "signUpUsers": len(signup), "inContest": n_contest, "afterContest": n_after,
