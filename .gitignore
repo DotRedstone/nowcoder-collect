@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# 提取出的数据（含队员姓名/代码）—— 绝不入库
+nowcoder-data/
+nowcoder-acm-data/
+*.json.bak
+
+# 登录态与个人标识 —— 绝不入库
+cookie.txt
+*.cookie
+uid.txt
+NOWCODER_COOKIE

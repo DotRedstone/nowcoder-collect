@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<header>
+  <h1>牛客代码收集器</h1>
+  <div id="stats" class="stats"></div>
+</header>
+<div class="toolbar">
+  <button id="captureBtn" class="btn primary">采集当前页</button>
+  <button id="exportFilesBtn" class="btn">导出文件</button>
+  <button id="exportCombinedBtn" class="btn">导出合集</button>
+  <button id="similarityBtn" class="btn">相似度报告</button>
+  <button id="diagnoseBtn" class="btn">诊断</button>
+  <button id="clearBtn" class="btn danger">清空</button>
+</div>
+<div class="filters">
+  <select id="groupBy">
+    <option value="student">按学生分组</option>
+    <option value="problem">按题目分组</option>
+    <option value="contest">按比赛分组</option>
+    <option value="none">不分组</option>
+  </select>
+  <input id="search" type="text" placeholder="搜索姓名 / 题目 / 语言 / 结果…">
+</div>
+<div id="similarityPanel" class="similarity hidden"></div>
+<div id="list" class="list"></div>
+<div id="empty" class="empty hidden">暂无采集的代码。打开牛客网代码页后点右下角「收集代码」，或点上方「采集当前页」。</div>
+<script src="popup.js"></script>
+</body>
+</html>

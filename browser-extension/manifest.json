@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "牛客代码收集器",
+  "version": "1.0.0",
+  "description": "收集牛客网 ACM 训练赛提交代码：批量采集、按学生/题目导出文件、相似度与风格指标辅助审查。",
+  "permissions": ["storage", "downloads"],
+  "host_permissions": ["*://*.nowcoder.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "牛客代码收集器"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.nowcoder.com/*"],
+      "js": ["content/extractor.js", "content/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
