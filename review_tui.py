@@ -266,6 +266,8 @@ class ReviewApp(App):
         self.settings_dirty = False
         self.login_generation = 0
         self.error_at_start = ""
+        self._people_readonly = False
+        self._reviews_readonly = False
         self._load_user_data()
 
     def _load_user_data(self):
@@ -287,13 +289,19 @@ class ReviewApp(App):
         try:
             self.people = PeopleStore()
         except (OSError, ValueError) as e:
-            self.people = PeopleStore(Path("/dev/null") if False else CONFIG_DIR / "people-recovery-unused.json")
-            self.error_at_start += f" 人员标记损坏：{e}（原文件未被覆盖）"
+            self.people = object.__new__(PeopleStore)
+            self.people.path = PEOPLE_PATH
+            self.people.data = {}
+            self._people_readonly = True
+            self.error_at_start += f" 人员标记损坏：{e}（只读，先修复原文件）"
         try:
             self.reviews = ReviewStore()
         except (OSError, ValueError) as e:
-            self.reviews = ReviewStore(CONFIG_DIR / "reviews-recovery-unused.json")
-            self.error_at_start += f" 线索记录损坏：{e}（原文件未被覆盖）"
+            self.reviews = object.__new__(ReviewStore)
+            self.reviews.path = CONFIG_DIR / "reviews.json"
+            self.reviews.data = {}
+            self._reviews_readonly = True
+            self.error_at_start += f" 线索记录损坏：{e}（只读，先修复原文件）"
         try:
             self.thresholds = load_thresholds()
         except (OSError, ValueError) as e:
@@ -680,6 +688,8 @@ class ReviewApp(App):
                     cid_i = int(filename.stem)
                     raw = json.loads(filename.read_text(encoding="utf-8"))
                     for case in raw.get("report", {}).get("results", []):
+                        if self.staff_ids().intersection(int(uid) for uid in case.get("student_ids", [])):
+                            continue
                         if self.reviews.status(case_key(cid_i, "contest", case)) == "待复核":
                             entries.append(({"cid": cid_i, "case": case}, (
                                 self._risk(case["verdict"], case.get("scores", {}).get("L3", 0)),
@@ -705,7 +715,7 @@ class ReviewApp(App):
         page.context["submission"] = sub
         cid = page.context["cid"]
         page.query_one("#frame").border_title = f"{sub.get('student', '')} · {sub.get('problem_index', '?')} · #{sub['submission_id']}"
-        page.query_one("#frame").border_subtitle = f"{index+1}/{len(seq)} · n/p"
+        page.query_one("#frame").border_subtitle = f"{index+1}/{len(seq)} · n/p · [/] 历史"
         ms = sub.get("submit_time")
         dt = datetime.fromtimestamp(ms/1000).strftime("%Y-%m-%d %H:%M:%S") if ms else "未知"
         page.query_one("#overview", Static).update(
@@ -956,6 +966,8 @@ class ReviewApp(App):
                 self.render_page(page)
             elif action == "mark_note":
                 targets, mark = page.context["chosen"]
+                if self._people_readonly:
+                    raise ValueError("人员标记文件损坏，必须修复原文件才能写入")
                 for uid in targets:
                     self.people.mark(page.context["cid"], uid, mark, value)
                 self.pop_page()
@@ -1045,6 +1057,9 @@ class ReviewApp(App):
         else:
             return
         cid = page.context["cid"]
+        if self._reviews_readonly:
+            self.set_status("线索复核记录损坏，必须先修复原文件")
+            return
         self.reviews.set(case_key(cid, "contest", case), status=status)
         self.set_status(f"复核状态已保存：{status}")
         if page.kind == "evidence":
@@ -1420,7 +1435,7 @@ class ReviewApp(App):
                 if match:
                     done, total = map(int, match.groups())
                     if total:
-                        self.call_from_thread(self.progress, f"{int(done/total*100)}% · {done}/{total}")
+                        self.call_from_thread(self.progress, f"阶段 {done}/{total}")
             stdout = process.stdout.read()
             process.wait()
             stderr = ""
