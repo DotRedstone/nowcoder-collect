@@ -50,7 +50,8 @@ DEFAULT_SETTINGS = {
 SCHEMA = {
     "threads": ("int", 1, 32),
     "collect_after": ("bool",), "auto_analyze": ("bool",),
-    "db_path": ("str",), "out_dir": ("str",), "theme": ("str",),
+    "db_path": ("str",), "out_dir": ("str",),
+    "theme": ("enum", "auto", "ansi-dark", "catppuccin-mocha", "nord", "gruvbox", "textual-dark"),
     "nerd_font": ("bool",), "density": ("enum", "紧凑", "宽松"),
     "language": ("enum", "中文", "English"), "key_hints": ("bool",),
     "rank_cheater": ("enum", *RANK_POLICY["cheater"]),
