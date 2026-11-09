@@ -679,7 +679,7 @@ class ReviewApp(App):
                 + ("成绩使用采集时保存的官方 submit-list 源数据；仍须人工复核。\n"
                    if official_source else
                    "⚠ 缺少官方报名零提交者与满分元数据，当前是本地推算，可能与官方榜不同。\n")
-                "在前四个选项上按 ←/→ 调整；按 e 导出。",
+                + "在前四个选项上按 ←/→ 调整；按 e 导出。",
                 ("名次/选项", "姓名/设置", "得分/说明"), entries)
         elif kind == "pending":
             entries = []
