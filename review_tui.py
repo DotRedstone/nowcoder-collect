@@ -75,7 +75,7 @@ class ReviewApp(App):
     }
     .pane {
         height: 1fr; min-width: 18;
-        border: round $text-muted; margin: 0 0 0 1;
+        border: round $panel; margin: 0 0 0 1;
         padding: 0 1; background: $background;
         border-title-color: $text-muted;
         border-title-style: bold;
