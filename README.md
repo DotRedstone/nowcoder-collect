@@ -110,6 +110,16 @@ set -lx NOWCODER_NERD_FONT 1
 
 若不存在该配色文件会回退到 ANSI 配色。原有检测算法、输出 schema 和旧 curses 界面均保留。
 
+### 可选代码语法高亮
+
+默认仅安装纯 Python 依赖；代码页面支持在检测到 Tree-sitter 解析器时自动启用 C/C++、Python、Java 等语言高亮，缺失时仍可查看、复制和滚动完整源码。需要高亮时额外安装：
+
+```fish
+python -m pip install -r requirements-tui-syntax.txt
+```
+
+该可选方案使用含原生扩展的语法解析包；NixOS 环境若安装失败可继续使用无高亮的默认界面。题目详情页按 `g` 循环排序：UID / 首次 AC 时间 / 昵称 / 对应题目线索数。
+
 ## 测试
 
 \`\`\`fish
