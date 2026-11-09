@@ -5,18 +5,23 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import re
+from datetime import datetime
 import subprocess
 import sys
 from pathlib import Path
 
+from rich.text import Text
+from textual.screen import ModalScreen
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import DataTable, Input, Static, TabbedContent, TabPane, TextArea
 
 from tui_backend import COOKIE_PATH, UID_PATH, DB_PATH, REVIEW_PATH, ReviewStore, case_key, local_contests, merge_contests, pair_sources, read_secret, write_secret
 import login
+from rice_theme import load_wallpaper_theme
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "skill/scripts"))
@@ -26,70 +31,106 @@ class ReviewApp(App):
     TITLE = "NOWCODER · Review Workspace"
     SUB_TITLE = "比赛代码审查"
     CSS = """
-    /* Quiet terminal canvas: no dashboard cards, no chunky buttons. */
-    Screen { layout: vertical; background: $background; color: $foreground; }
+    Screen {
+        layout: vertical; background: $background; color: $foreground;
+    }
     #titlebar {
-        height: 1; padding: 0 1; background: $surface;
-        color: $primary; text-style: bold;
+        height: 1; padding: 0 2;
+        color: $text-muted; background: $background;
     }
-    #keybar {
-        height: 1; padding: 0 1; background: $background;
-        color: $text-muted;
+    #workspace {
+        height: 1fr; width: 100%;
+        padding: 0 1; background: $background;
     }
-    #status {
-        height: 1; padding: 0 1; background: $surface;
-        color: $foreground;
-    }
-    #command-row, #id-row {
-        display: none; height: 1; background: $surface;
-    }
-    #command, #contest-input { height: 1; border: none; background: $surface; padding: 0 1; }
-    #workspace { height: 1fr; background: $background; }
     .pane {
         height: 1fr; min-width: 18;
-        padding: 0 1; border-right: solid $primary 22%;
-        background: $background;
+        border: round $panel; margin: 0 0 0 1;
+        padding: 0 1; background: $background;
+        border-title-color: $text-muted;
+        border-title-style: bold;
+        border-subtitle-color: $text-muted;
+        border-subtitle-align: right;
     }
-    .pane:focus-within { border-left: solid $primary; }
+    .pane:focus-within {
+        border: round $accent;
+        border-title-color: $accent;
+        border-subtitle-color: $text-accent;
+    }
     #left { width: 25%; }
     #middle { width: 38%; }
-    #right { width: 37%; border-right: none; }
-    .pane-heading {
-        height: 1; color: $primary; text-style: bold;
-        background: $background;
-    }
-    #filterline { height: 1; color: $text-muted; }
+    #right { width: 37%; }
     DataTable {
-        height: 1fr; background: $background; color: $foreground;
+        height: 1fr;
+        background: $background; color: $foreground;
         scrollbar-size: 1 1;
     }
     DataTable > .datatable--cursor {
-        background: $primary 28%; color: $foreground; text-style: bold;
+        background: $accent 20%;
+        color: $foreground;
+        text-style: none;
     }
-    DataTable > .datatable--hover { background: $primary 12%; }
+    DataTable > .datatable--hover { background: $accent 9%; }
     #search {
-        display: none; height: 1; border: none;
-        background: $surface; color: $foreground; padding: 0 1;
+        display: none; height: 1;
+        padding: 0 1; border: none;
+        background: $surface;
     }
     #evidence {
         height: 11; padding: 1 0 0 1;
         overflow-y: auto; color: $foreground;
     }
-    #codes { height: 1fr; background: $background; }
+    #empty {
+        display: none; height: auto; padding: 3 1;
+        color: $foreground;
+    }
+    #filterline { height: 1; color: $text-muted; }
+    #codes { height: 1fr; }
     TabbedContent { background: $background; }
     Tabs { height: 2; background: $background; }
     Tab { background: $background; color: $text-muted; padding: 0 1; }
-    Tab.-active { background: $background; color: $primary; text-style: bold; }
+    Tab.-active { background: $background; color: $accent; text-style: bold; }
     TextArea {
-        height: 1fr; background: $background; color: $foreground;
-        border: none; scrollbar-size: 1 1;
+        height: 1fr; border: none;
+        background: $background; color: $foreground;
+        scrollbar-size: 1 1;
     }
     #code-a, #code-b { width: 1fr; }
-    #login-panel { display: none; height: 1fr; padding: 1 2; background: $background; }
-    #login-heading { height: 1; color: $primary; text-style: bold; }
-    #qr { height: 1fr; overflow-y: auto; }
-    #login-message { height: 2; color: $text-muted; }
-    #uid-input { height: 3; margin: 1 0; }
+    #status {
+        height: 1; width: 100%;
+        background: $surface; color: $foreground;
+    }
+    #command-row, #id-row { display: none; height: 1; }
+    #command, #contest-input {
+        height: 1; border: none; padding: 0 1;
+        background: $surface;
+    }
+    #login-panel {
+        display: none;
+        height: 1fr;
+        align: center middle;
+        padding: 1 2;
+    }
+    #login-card {
+        width: 90; max-width: 100%; height: 100%;
+        border: round $panel;
+        border-title-color: $accent;
+        padding: 1 2; background: $background;
+    }
+    #qr {
+        height: 1fr; text-align: center;
+        overflow-y: auto;
+    }
+    #login-message {
+        height: 2; text-align: center;
+        color: $text-muted;
+    }
+    #uid-input { height: 3; margin: 0 0 1 0; }
+    HelpScreen { align: center middle; background: $background 70%; }
+    #help-card {
+        width: 72; max-width: 95%;
+        height: auto; border: round $accent;
+        padding: 1 2; background: $surface;
+    }
     """
     BINDINGS = [
         Binding("q", "quit", "quit", show=False),
@@ -135,39 +176,43 @@ class ReviewApp(App):
         self.login_visible = False
         self.filter_idx = 0
         self.active_pane = 0
+        self._selected_finding = None
+        self._status_message = "ready"
+        self._progress = ""
+        self._spinner_tick = 0
+        self._wallpaper_source = ""
+        self._nerd_font = os.environ.get("NOWCODER_NERD_FONT", "0") == "1"
+        self._help_visible = False
 
     def compose(self) -> ComposeResult:
-        yield Static("  ◈ nowcoder / review  ·  1 contests  2 findings  3 inspect", id="titlebar")
+        yield Static("nowcoder / review", id="titlebar")
         with Horizontal(id="command-row"):
-            yield Input(placeholder=": command  (help / collect / analyze / contest 123 / theme nord)", id="command")
+            yield Input(placeholder=":help / :collect / :analyze / :contest ID / :theme auto", id="command")
         with Horizontal(id="id-row"):
             yield Input(placeholder="contest id ↵", id="contest-input")
         with Horizontal(id="workspace"):
             with Vertical(classes="pane", id="left"):
-                yield Static(" 01  CONTESTS", classes="pane-heading")
-                yield DataTable(id="contests", cursor_type="row", show_header=False, cell_padding=1)
+                yield DataTable(id="contests", cursor_type="row", show_header=False, cell_padding=0)
             with Vertical(classes="pane", id="middle"):
-                yield Static(" 02  FINDINGS", classes="pane-heading")
-                yield Static(" ALL  ·  press f to filter", id="filterline")
-                yield Input(placeholder="/ search names / problem / verdict", id="search")
-                yield DataTable(id="findings", cursor_type="row", show_header=False, cell_padding=1)
+                yield Static("ALL · f 筛选 · / 搜索", id="filterline")
+                yield Input(placeholder="/ 搜索选手、题号、结果", id="search")
+                yield Static("", id="empty")
+                yield DataTable(id="findings", cursor_type="row", show_header=False, cell_padding=0)
             with Vertical(classes="pane", id="right"):
-                yield Static(" 03  INSPECTOR  /  code & diff", classes="pane-heading")
-                yield Static("Select a contest · press a to analyze or c to collect.", id="evidence")
+                yield Static("选择一条线索查看代码与时间证据。", id="evidence")
                 with TabbedContent(id="codes"):
-                    with TabPane("A ↔ B"):
+                    with TabPane("源码 A ↔ B"):
                         with Horizontal():
                             yield TextArea("", id="code-a", read_only=True, show_line_numbers=True)
                             yield TextArea("", id="code-b", read_only=True, show_line_numbers=True)
-                    with TabPane("unified diff"):
+                    with TabPane("Diff"):
                         yield TextArea("", id="diff", read_only=True, show_line_numbers=True)
         with Vertical(id="login-panel"):
-            yield Static(" LOGIN  /  WECHAT QR   ·   s scan   ·   Enter save UID   ·   Esc back", id="login-heading")
-            yield Static("Press s to start scanning, or use a saved Cookie.", id="qr")
-            yield Static("", id="login-message")
-            yield Input(placeholder="Nowcoder UID (from your profile URL) · Enter to save", id="uid-input")
-        yield Static(" NORMAL  ·  ready", id="status")
-        yield Static(" 1/2/3 panes   j/k move   / search   f filter   : commands   a analyze   c collect   x review   ? help", id="keybar")
+            with VerticalScroll(id="login-card"):
+                yield Static("按 s 扫码 · 输入 UID 后回车保存 · Esc 返回", id="login-message")
+                yield Static("按 s 开始微信扫码登录。", id="qr")
+                yield Input(placeholder="牛客 UID（主页地址中的数字）· Enter 保存", id="uid-input")
+        yield Static("", id="status")
 
     def on_key(self, event):
         if not isinstance(self.focused, DataTable): return
@@ -179,11 +224,14 @@ class ReviewApp(App):
             event.stop()
 
     def on_mount(self):
-        self.theme = os.environ.get("NOWCODER_THEME") or os.environ.get("TEXTUAL_THEME") or "ansi-dark"
+        self.apply_theme(os.environ.get("NOWCODER_THEME") or os.environ.get("TEXTUAL_THEME") or "auto")
         self.query_one("#contests", DataTable).add_columns("比赛", "提交", "代码")
         self.query_one("#findings", DataTable).add_columns("级别", "题", "选手对", "L3", "状态")
+        self._update_pane_titles()
         self.load_contests()
         self.apply_layout()
+        self.set_interval(1.0, self.update_statusline)
+        self.update_statusline()
         self.query_one("#contests", DataTable).focus()
         if read_secret(COOKIE_PATH):
             self.action_refresh()
