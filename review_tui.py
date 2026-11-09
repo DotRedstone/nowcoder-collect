@@ -213,7 +213,7 @@ class ReviewApp(App):
         Binding("escape", "back", "返回", show=False),
         Binding("h", "back_or_adjust", "返回或调整", show=False),
         Binding("l", "enter_or_adjust", "进入或调整", show=False),
-        Binding("enter", "enter", "进入", show=False),
+        # DataTable.RowSelected handles Enter; Input.Submitted handles forms.
         Binding("j", "down", "下移", show=False),
         Binding("k", "up", "上移", show=False),
         Binding("g", "group_or_top", "分组或顶部", show=False),
