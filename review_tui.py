@@ -191,7 +191,14 @@ class ReviewApp(App):
             self.status("本地数据可离线使用 · 如需远程比赛请登录。")
 
     def status(self, text):
-        self.query_one("#status", Static).update(text)
+        self.query_one("#status", Static).update(" " + text)
+
+    def update_title(self):
+        contest = f"#{self.contest}" if self.contest is not None else "no contest"
+        findings = f"{len(self.cases)} findings" if self.cases else "no report"
+        self.query_one("#titlebar", Static).update(
+            f" ◈ nowcoder / review   ›  {contest}   ·   {findings}   |   1 contests  2 findings  3 inspect"
+        )
 
     def load_contests(self):
         try:
@@ -219,6 +226,7 @@ class ReviewApp(App):
         self.query_one("#evidence", Static).update(f"已选择比赛 #{cid}\n按 a 检测数据库 · 按 c 抓取后检测")
         for name in ("#code-a", "#code-b", "#diff"):
             self.query_one(name, TextArea).load_text("")
+        self.update_title()
         self.status(f"比赛 #{cid} · a 本地分析 · c 采集 · r 在线刷新")
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted):
@@ -308,10 +316,18 @@ class ReviewApp(App):
                 pane.display = i == self.active_pane
                 pane.styles.width = "100%"
         elif width < 116:
-            for i, pane in enumerate(panes):
-                pane.display = i != 2
-            panes[0].styles.width = "40%"
-            panes[1].styles.width = "60%"
+            if self.active_pane == 2:
+                panes[0].display = False
+                panes[1].display = True
+                panes[2].display = True
+                panes[1].styles.width = "45%"
+                panes[2].styles.width = "55%"
+            else:
+                panes[0].display = True
+                panes[1].display = True
+                panes[2].display = False
+                panes[0].styles.width = "38%"
+                panes[1].styles.width = "62%"
         else:
             for pane in panes:
                 pane.display = True
@@ -609,6 +625,7 @@ class ReviewApp(App):
         self.report = report or {}
         self.cases = self.report.get("results", [])
         self.filter_cases()
+        self.update_title()
         self.status(f"分析完成 · 比较 {self.report.get('meta', {}).get('pairs_compared', 0)} 对 · {len(self.cases)} 条线索")
 
     def action_rank(self):
