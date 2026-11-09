@@ -1,82 +1,88 @@
-# nowcoder-collect · 牛客代码收集与雷同检测
+# nowcoder-collect · 牛客比赛代码审查工作台
 
-一个完整的 ACM 训练队工具：**登录 → 爬取比赛全部提交 → 去 LLM 化确定性雷同检测 → 结果汇总**。用于训练队代码审查（防 AI 代做 / 防抄袭）。纯 Python 标准库，零第三方依赖。
+采集牛客 ACM 比赛提交、执行确定性雷同检测，**辅助人工复核**。相似代码、时间关系或算法分级并不意味着作弊已被证明。
 
-## 快速开始
+## 启动
 
-```bash
-git clone https://github.com/DotRedstone/nowcoder-collect.git
-cd nowcoder-collect
-./run.sh            # 一个命令启动：没登录会自动弹二维码扫码登录，然后进面板
-```
-
-## 使用流程
-
-整条流程在 TUI 面板里一条龙完成：
-
-1. **登录**：`python3 login.py` 在终端渲染二维码，微信「扫一扫」即登录（Cookie 存 `~/.dsh/nowcoder/cookie.txt`）。二维码优先用 `qrencode` 渲染，没装则自动通过 `nix-shell` 拉取或走在线 QR 服务兜底。也可打开 `python3 tui.py` 后在菜单里选「扫码登录」。
-2. **选比赛**：菜单「选择比赛并分析」→ 列出你参加的比赛 → `↑↓` 选一个。
-3. **爬取**：自动多线程抓取该场**比赛期间**的全部提交（代码 + 姓名 + 题号 + 语言 + 结果 + 得分 + 时间），写入 SQLite。
-4. **分析**：去 LLM 化确定性雷同检测，同题两两比较。
-5. **汇总**：按分级浏览雷同对，`Enter` 看详情，`r` 看榜单，`q` 返回。
-
-### 分析结论长什么样
-
-| 等级 | 含义 | 例子 |
-|---|---|---|
-| **实锤** | 去空白后逐字节一致 + 时间方向成立 | 张三/B ↔ 李四（L2=1.0，Δ=167s） |
-| **中偏强** | 稀有 n-gram 高度共享 + 结构高度相似（改名/改写） | 张三/C ↔ 李四（L3=0.93） |
-| **存疑** | 结构相似 + 一定稀有指纹，需人工看 | — |
-| **排除** | 其余；含「人群模板」（多人写同一份正解） | A 题大家答案一样 |
-
-每个结论都带证据：三口径相似度（L1 原文 / L2 去空白 / L3 词法归一化）、稀有 n-gram 指纹、时间线（谁先 AC / 时间差 / 失败次数）。不是「我觉得像」，是可复现、可审计的数字。
-
-## 目录结构
-
-```
-nowcoder-collect/
-├── login.py              # 终端扫码登录（微信）
-├── tui.py                # 一体化 TUI 面板（主入口）
-├── detector/             # 去 LLM 化确定性雷同检测器
-│   ├── main.py           #   python main.py --contest 143786
-│   ├── config.toml       #   阈值配置（可调）
-│   ├── detectors/        #   preprocess/normalize/similarity/template/timeline/classify
-│   ├── docs/design.md    #   内核设计文档（算法/公式/参考文献）
-│   └── tests/            #   单元 + 回归测试
-├── skill/                # DSH skill（给 agent 读，见 skill/SKILL.md）
-├── browser-extension/    # 浏览器插件（可选，网页端采集）
-├── install.sh
-└── LICENSE
-```
-
-## 检测器单独用（想直接拿 JSON）
+需要 Python 3.11+。采集器、检测器和旧版 curses TUI 仍然只依赖标准库；新版终端界面使用 [Textual](https://textual.textualize.io/)。
 
 ```bash
-cd detector
-python3 main.py --contest 143786 --all --json-out report.json   # 全部对（含"排除"）
-python3 -m unittest discover -s tests -v                        # 22 个测试
+python3 -m pip install -r requirements-tui.txt
+./run.sh
 ```
 
-内核算法（L1/L2/L3 归一化、稀有 n-gram、时间线、分级规则、确定性保证、参考文献）见 [`detector/docs/design.md`](detector/docs/design.md)。
-
-## 给 DSH agent 用（可选）
-
-这是给 DSH agent 装的技能。agent 读 [`skill/SKILL.md`](skill/SKILL.md)（那是 agent 的说明书，含接口逆向记录和 CLI 命令）；人类看本 README 就够。
+在 NixOS 等不允许全局 pip 安装的环境，可使用虚拟环境：
 
 ```bash
-./install.sh    # 软链到 $DSH_HOME/skills/nowcoder-collect，skill-filesystem 自动发现
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-tui.txt
+./run.sh
 ```
 
-## 浏览器插件（可选）
+无 Textual 时仍可运行 `./run.sh --legacy` 进入原 curses 界面；检测 CLI 和 DSH skill 完全保留。
 
-Chrome/Edge：`chrome://extensions` → 开发者模式 → 「加载已解压的扩展程序」→ 选 `browser-extension/` 目录。
+## 新工作区
 
-## 说明
+- **左栏比赛**：同时显示 SQLite 本地比赛与在线最近参加的比赛。无需联网即可读取已采集比赛。顶部可直接输入比赛 ID 打开未参加的比赛。
+- **中栏线索**：按参赛者、题号、检测等级搜索，按高优先级和人工复核状态筛选。
+- **右栏证据**：同时查看三种相似度、稀有指纹、提交时间线，以及用于检测的两份代表代码、统一差异视图。
+- **人工复核**：提供“已核查 / 无需跟进 / 需进一步核实”状态，独立保存在 `~/.dsh/nowcoder/reviews.json`，不会写回原比赛数据或改变检测算法结论。
+- **后台任务**：采集和检测作为子进程执行，UI 持续响应；Ctrl+X 可请求取消当前采集/检测，任务失败会在状态栏说明。
 
-- 相似度与注释占比只是**线索**，不是「AI 作弊」的最终判定；请结合题目难度、提交时间、代码风格人工判断。
-- 工具只读牛客数据，不改账号任何内容。
-- 请遵守牛客平台规则与队员隐私约定，仅用于队伍训练审查。
+快速键：`1/2/3` 切比赛、线索、审查窗格；`j/k` 或方向键移动；`/` 搜索、`f` 循环过滤、`:` 打开命令模式；`a` 离线分析、`c` 采集并分析、`r` 在线刷新；`i` 输入比赛 ID、`l` 登录、`s` 扫码；`x` 标记已核查、`d` 无需跟进、`!` 需进一步核实；`t` 切换主题、`Ctrl+X` 取消后台任务、`?` 帮助、`q` 退出。
 
-## License
+界面采用紧凑的 Linux rice 风格：圆角窗格标题和副标题显示筛选结果数；焦点边框与强调色绑定；风险等级按红 / 黄 / 灰提示，复核状态单独着色。底部是单行 lualine 风格状态栏，包含 NORMAL/COMMAND/COLLECT 模式、当前比赛和窗格、主题、时间与采集进度。`?` 弹出完整按键说明，不常驻第二条快捷键栏。
 
-MIT
+### 主题、Nerd Font 与壁纸联动
+
+默认 `auto`：优先读取 `~/.cache/wal/colors.json`（pywal），其次尝试 `~/.cache/matugen/colors.json`、`~/.config/matugen/colors.json`；都没有就回退到 `ansi-dark`。**matugen 没有固定的 JSON 输出位置**，所以如果你通过 matugen 模板生成 JSON，最可靠的是设置 `NOWCODER_THEME_FILE` 指向该文件。仅解析 JSON 色值，不运行外部脚本或 shell。
+
+运行时每 4 秒检查一次配色文件是否变更（`auto`/ `wallpaper` 模式），更新壁纸后通常无需重启。可用 `:theme auto` 重新读取，或用 `:theme gruvbox` 固定主题（固定主题不会跟随壁纸）。`t` 在内置和已注册的壁纸主题间切换。
+
+在 **Fish Shell** 中使用：
+
+```fish
+# 有 pywal 或 matugen JSON 时自动跟随
+set -lx NOWCODER_THEME auto
+set -lx NOWCODER_THEME_FILE ~/.cache/wal/colors.json
+
+# Nerd Font 可用时启用 powerline glyph；缺字形就不设置
+set -lx NOWCODER_NERD_FONT 1
+./run.sh
+```
+
+无 Nerd Font 默认使用 `▌` 作为分隔符，避免乱码。预置主题也可用 `NOWCODER_THEME=nord ./run.sh`。其他命令包括 `:contest 143786`、`:analyze`、`:collect`。
+
+窄屏为单窗格，使用 `1/2/3` 切换；中等宽度显示两个窗格，当前在审查窗格时显示“线索 + 审查”。
+
+首次登录：按 `l` 打开登录页，按 `s` 扫码并用微信确认；Cookie 存于 `~/.dsh/nowcoder/cookie.txt`。在线最近比赛列表还需要用户 UID，可在账户页面填写（从牛客个人主页地址获取），保存在 `~/.dsh/nowcoder/uid.txt`。请勿提交 Cookie、UID 或私人审查记录。
+
+数据库：`~/.dsh/nowcoder/nowcoder.db`；采集输出：`~/nowcoder-data/<比赛ID>/`。旧数据格式保持兼容。
+
+## 检测与测试
+
+```bash
+python3 detector/main.py --contest 143786 --json-out report.json
+(cd detector && python3 -m unittest discover -s tests -v)
+python3 -m unittest discover -s tests -v
+```
+
+确定性检测器使用 L1 原文、L2 去空白、L3 词法归一化、稀有 n-gram、模板排除和提交时间线。详细算法、阈值和限制见 [detector/docs/design.md](detector/docs/design.md)。
+
+## 目录
+
+```text
+review_tui.py         Textual 多面板审查工作区
+tui_backend.py        本地比赛索引、代码查询、复核记录
+tui.py                原版 curses TUI（--legacy）
+login.py              微信扫码登录
+skill/scripts/        牛客数据采集 CLI
+detector/             确定性雷同检测器
+browser-extension/    浏览器采集扩展（可选）
+tests/                TUI 数据层测试
+```
+
+数据隐私：工具只读取牛客页面，不提交修改；代码和审查记录中可能包含他人隐私，请勿上传公共仓库。模型不能仅凭代码相似度直接认定抄袭或 AI 代做。
+
+MIT License。
