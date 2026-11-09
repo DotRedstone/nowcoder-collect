@@ -1,5 +1,7 @@
 """Headless Textual tests for rice layout, offline use and keyboard navigation."""
 import asyncio
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -89,6 +91,35 @@ class SmokeTests(unittest.TestCase):
                     self.assertIn("MED", app._risk_cell(result, True).plain)
                     self.assertIn("▎", app._risk_cell(result, True).plain)
                     self.assertIn("1/1", app.query_one("#middle").border_subtitle)
+        asyncio.run(run())
+
+
+    def test_wallpaper_theme_reloads_on_json_change(self):
+        async def run():
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "colors.json"
+                def write(primary):
+                    path.write_text(json.dumps({
+                        "special": {"background": "#101010", "foreground": "#eeeeee"},
+                        "colors": {"color4": primary, "color5": "#d783d7"}
+                    }))
+                write("#5588bb")
+                with patch.dict(os.environ, {
+                    "NOWCODER_THEME": "auto", "NOWCODER_THEME_FILE": str(path),
+                }), patch("review_tui.read_secret", return_value=""), patch(
+                    "review_tui.local_contests", return_value=[]
+                ):
+                    app = ReviewApp()
+                    async with app.run_test(size=(115, 36)) as pilot:
+                        await pilot.pause()
+                        self.assertEqual(app.theme, "wallpaper")
+                        self.assertEqual(app.current_theme.primary, "#5588bb")
+                        original = path.stat().st_mtime_ns
+                        write("#bb7755")
+                        os.utime(path, ns=(original + 2_000_000_000, original + 2_000_000_000))
+                        app.poll_wallpaper()
+                        await pilot.pause()
+                        self.assertEqual(app.current_theme.primary, "#bb7755")
         asyncio.run(run())
 
 
