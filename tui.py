@@ -269,20 +269,29 @@ class Tui:
         txt = self.status.get("text", "")
         w = self.w()
 
+        y = 2
         for i, s in enumerate(steps, 1):
-            y = 2 + i
             if i < step:
                 self.scr.addstr(y, 3, f"  ✓  {s}", curses.color_pair(5))
+                y += 1
             elif i == step:
                 self.scr.addstr(y, 3, f"  ▶  {s}", curses.color_pair(3) | curses.A_BOLD)
+                y += 1
+                # 阶段内进度条：缩进挂在当前 ▶ 这一步下面，明确给出 X/Y + 百分比
+                if total > 0:
+                    frac = min(1.0, cur / total)
+                    bar_w = max(10, min(40, w - 28))
+                    filled = int(bar_w * frac)
+                    bar = "█" * filled + "░" * (bar_w - filled)
+                    self.scr.addstr(y, 6, f"└─ [{bar}]  {cur}/{total}  ({int(frac * 100)}%)", curses.color_pair(3))
+                else:
+                    self.scr.addstr(y, 6, f"└─ {txt[: w - 8]}", curses.color_pair(3))
+                y += 1
             else:
                 self.scr.addstr(y, 3, f"  ○  {s}", curses.color_pair(4))
+                y += 1
 
-        py = 2 + len(steps) + 1
-        if total > 0 and step == 3:
-            self.progress_bar(py, 3, w - 6, cur / total, f"  抓取进度")
-        else:
-            self.scr.addstr(py, 3, f"  {txt[: w - 6]}", curses.color_pair(3))
+        self.scr.addstr(y + 1, 3, f"  {txt[: w - 6]}", curses.A_DIM)
         self.footer(["请稍候… 多线程爬取约 1 分钟"])
 
     def draw_results(self):
