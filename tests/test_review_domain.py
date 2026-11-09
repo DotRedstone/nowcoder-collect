@@ -11,6 +11,7 @@ from review_domain import (
     hidden_uids, load_filters, load_staff, local_rank, people_for_contest,
     person_submissions, problem_submissions, problems_for_contest,
     representative_for, save_filters, save_staff, validate_filters,
+    save_rank_snapshot, rank_source_available,
 )
 
 class DomainTests(unittest.TestCase):
@@ -91,6 +92,26 @@ class DomainTests(unittest.TestCase):
         self.assertEqual(marked[1]["rank"], "—")
         self.assertEqual(marked[1]["mark"], "作弊者")
         self.assertEqual(marked[0]["rank"], 1)
+
+    def test_rank_snapshot_matches_submit_list_and_zero_submit(self):
+        problems = [{"problemId": 3, "score": 100, "index": "A"}]
+        signup = {11: {"name": "张三"}, 22: {"name": "李四"}, 33: {"name": "零提交"}}
+        submissions = [
+            {"uid": 11, "problemId": 3, "status": 5, "rightCaseRate": 1},
+            {"uid": 22, "problemId": 3, "status": 4, "rightCaseRate": 0.6},
+        ]
+        from unittest.mock import patch
+        from review_domain import RANK_SNAPSHOT_DIR
+        with patch("review_domain.RANK_SNAPSHOT_DIR", self.root / "snapshot"):
+            # Parameter default of save_rank_snapshot is bound at import time.
+            save_rank_snapshot(5, self.db, problems, signup, submissions,
+                               directory=self.root / "snapshot")
+            self.assertTrue(rank_source_available(5, self.db, self.root / "snapshot"))
+            rows = local_rank(5, self.db)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[-1]["uid"], 33)
+        self.assertEqual(rows[-1]["submissions"], 0)
+        self.assertEqual([p["total"] for p in rows], [100, 60, 0])
 
     def test_export_all_formats_escape_html_and_csv(self):
         rows = [{"rank": 1, "name": "<张|三>", "uid": 11, "ac": 1, "total": 150, "mark": "正常"}]
