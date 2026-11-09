@@ -45,8 +45,8 @@ description: 收集牛客网 ACM 比赛（ac.nowcoder.com）的提交代码。�
 python3 scripts/nowcoder_extract.py --recent --uid <你的数字uid>
 # 或在 ~/.dsh/nowcoder/uid.txt 写入 uid 后省略 --uid
 
-# 2) 提取某场比赛「比赛期间」代码（默认）
-python3 scripts/nowcoder_extract.py --contest 143786 --out ./nowcoder-data
+# 2) 提取某场比赛「比赛期间」代码（默认，完整 597 条，多线程加速）
+python3 scripts/nowcoder_extract.py --contest 143786 --threads 32 --out ./nowcoder-data
 
 # 3) 含补题的完整数据
 python3 scripts/nowcoder_extract.py --contest 143786 --phase all
@@ -96,7 +96,8 @@ python3 scripts/nowcoder_extract.py --query "select problem_index, count(*) from
 | --- | --- | --- |
 | 最近参加的比赛 | `/acm-heavy/acm/contest/profile/contest-joined-history?uid={uid}&page=1&pageSize=30&onlyJoinedFilter=true&searchContestName=&onlyRatingFilter=false&contestEndFilter=true` | JSON，`data.dataList[]` |
 | 比赛信息 | `/acm/contest/contest-info?id={contestId}` | JSON，`data.name`/`startTime`/`endTime`/`description` |
-| 提交列表 | `/acm/contest/status-list?token=&id={contestId}&page={n}&pageSize=50` | JSON，`data.data[]`（`userName`/`userId`/`index` 题号/`languageName`/`statusMessage`/`submissionId`/`problemId`/`score`/`submitTime`），`data.basicInfo.pageCount/statusCount` 翻页 |
+| 提交列表 | `/acm/contest/status-list?token=&id={contestId}&page={n}&pageSize=50` | JSON，但**不完整**（仅约 1/3，含补题），只用于补题采集，不作主源 |
+| 榜单完整数据 | `/acm/contest/rank/submit-list?currentContestId={id}&contestList={id}&rankScope=ALL` | JSON，`data.problemData[]`（index 题号/score 满分/title 标题）+ `submitDataList[0].signUpUsers[]`（报名用户）+ `submitDataList[0].submissions[]`（比赛期间全部提交 uid/problemId/submissionId/submitTime/status/rightCaseRate）。**这是主源，#rank 前端就靠它客户端算榜** |
 | 代码页 | `/acm/contest/view-submission?submissionId={id}` | 服务端渲染 HTML，代码在 `<pre class="prettyprint lang-xxx">…</pre>`（HTML 转义） |
 
 - 代码页是服务端渲染，`fetch` 直接拿到 `pre.prettyprint` 的 `textContent`，无需执行 JS。

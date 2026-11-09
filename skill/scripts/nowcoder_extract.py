@@ -269,7 +269,7 @@ def _jaccard(a, b):
 
 def build_similarity(items):
     fps = [(it, _winnow(it["code"])) for it in items if it["code"]]
-    pairs = []
+    best = {}  # (min_uid, max_uid, problem) -> (a, b, max_sim)，同一对人同题只报一次
     for i in range(len(fps)):
         for j in range(i + 1, len(fps)):
             a, fa = fps[i]
@@ -279,9 +279,12 @@ def build_similarity(items):
             if a["problemIndex"] != b["problemIndex"]:
                 continue
             sc = _jaccard(fa, fb)
-            if sc >= 0.5:
-                pairs.append((a, b, sc))
-    pairs.sort(key=lambda x: -x[2])
+            if sc < 0.5:
+                continue
+            key = (min(a["studentId"], b["studentId"]), max(a["studentId"], b["studentId"]), a["problemIndex"])
+            if key not in best or sc > best[key][2]:
+                best[key] = (a, b, sc)
+    pairs = sorted(best.values(), key=lambda x: -x[2])
     return pairs
 
 
