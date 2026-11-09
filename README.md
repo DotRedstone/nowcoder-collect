@@ -1,168 +1,84 @@
 # nowcoder-collect · 牛客代码收集与雷同检测
 
-一个完整的 ACM 训练队工具：**登录 → 爬取比赛全部提交 → 去 LLM 化确定性雷同检测 → 结果/榜单**。用于训练队管理与代码审查（防 AI 代做 / 防抄袭）。
-
-## 核心组件（主体）
-
-| 组件 | 位置 | 作用 |
-| --- | --- | --- |
-| **爬取器** | `skill/scripts/nowcoder_extract.py` | 登录态抓取比赛全部提交 + 榜单，落 SQLite（多线程，纯标准库） |
-| **检测器** | `detector/` | 去 LLM 化确定性雷同检测：L1/L2/L3 归一化 + 稀有 n-gram + 时间线 + 规则分级 |
-| **TUI 面板** | `tui.py` | 一体化 curses 面板，一条命令跑完整个流程 |
-
-## 附加项（可选）
-
-| 组件 | 位置 | 作用 |
-| --- | --- | --- |
-| DSH skill | `skill/` | 给 [DSH](https://github.com/DeepSeekAI/dsh) agent 的技能封装（爬取 + 榜单） |
-| 浏览器插件 | `browser-extension/` | Chrome/Edge 网页端采集（独立可用） |
+一个完整的 ACM 训练队工具：**登录 → 爬取比赛全部提交 → 去 LLM 化确定性雷同检测 → 结果汇总**。用于训练队代码审查（防 AI 代做 / 防抄袭）。纯 Python 标准库，零第三方依赖。
 
 ## 快速开始
 
 ```bash
 git clone https://github.com/DotRedstone/nowcoder-collect.git
 cd nowcoder-collect
-python3 login.py          # 终端扫码登录：显示二维码，微信「扫一扫」自动保存 Cookie
-python3 tui.py            # 一体化面板：登录 → 选比赛 → 爬取 → 分析 → 结果/榜单
-python3 tui.py --check    # 非交互：校验登录并列出比赛
+
+python3 login.py    # ① 终端扫码登录：显示二维码，微信扫一扫自动保存 Cookie
+python3 tui.py      # ② 打开面板：选比赛 → 爬取 → 分析 → 结果/榜单
 ```
 
-首次登录：`python3 login.py` 在终端渲染二维码（纯标准库 QR 编码器，无需装任何东西），微信扫码即登录；也可在 TUI 面板里选「扫码登录」，或手动粘贴 Cookie 到 `~/.dsh/nowcoder/cookie.txt`。
+## 使用流程
+
+整条流程在 TUI 面板里一条龙完成：
+
+1. **登录**：`python3 login.py` 在终端渲染二维码，微信「扫一扫」即登录（Cookie 存 `~/.dsh/nowcoder/cookie.txt`）。也可打开 `python3 tui.py` 后在菜单里选「扫码登录」。
+2. **选比赛**：菜单「选择比赛并分析」→ 列出你参加的比赛 → `↑↓` 选一个。
+3. **爬取**：自动多线程抓取该场**比赛期间**的全部提交（代码 + 姓名 + 题号 + 语言 + 结果 + 得分 + 时间），写入 SQLite。
+4. **分析**：去 LLM 化确定性雷同检测，同题两两比较。
+5. **汇总**：按分级浏览雷同对，`Enter` 看详情，`r` 看榜单，`q` 返回。
+
+### 分析结论长什么样
+
+| 等级 | 含义 | 例子 |
+|---|---|---|
+| **实锤** | 去空白后逐字节一致 + 时间方向成立 | 张三/B ↔ 李四（L2=1.0，Δ=167s） |
+| **中偏强** | 稀有 n-gram 高度共享 + 结构高度相似（改名/改写） | 张三/C ↔ 李四（L3=0.93） |
+| **存疑** | 结构相似 + 一定稀有指纹，需人工看 | — |
+| **排除** | 其余；含「人群模板」（多人写同一份正解） | A 题大家答案一样 |
+
+每个结论都带证据：三口径相似度（L1 原文 / L2 去空白 / L3 词法归一化）、稀有 n-gram 指纹、时间线（谁先 AC / 时间差 / 失败次数）。不是「我觉得像」，是可复现、可审计的数字。
 
 ## 目录结构
 
 ```
 nowcoder-collect/
-├── tui.py                        # ★ TUI 面板（主入口）
-├── login.py                      # ★ 终端扫码登录（微信，纯标准库）
-├── qr.py                         #   极简 QR 编码器（纯标准库）
-├── detector/                     # ★ 去 LLM 化确定性雷同检测器
-│   ├── main.py                   #   python main.py --contest 143786
-│   ├── config.toml               #   阈值配置
-│   ├── detectors/                #   preprocess/normalize/similarity/template/timeline/classify
-│   ├── docs/design.md            #   内核设计文档（含参考文献）
-│   └── tests/                    #   单元 + 回归测试（22 个）
-├── skill/                        # 附加：DSH skill（爬取 + 榜单）
-│   ├── SKILL.md
-│   └── scripts/nowcoder_extract.py
-├── browser-extension/            # 附加：浏览器插件
-├── install.sh                    # 附加：一键安装 skill
-├── LICENSE
-└── README.md
+├── login.py              # 终端扫码登录（微信）
+├── tui.py                # 一体化 TUI 面板（主入口）
+├── qr.py                 # 极简 QR 编码器（纯标准库）
+├── detector/             # 去 LLM 化确定性雷同检测器
+│   ├── main.py           #   python main.py --contest 143786
+│   ├── config.toml       #   阈值配置（可调）
+│   ├── detectors/        #   preprocess/normalize/similarity/template/timeline/classify
+│   ├── docs/design.md    #   内核设计文档（算法/公式/参考文献）
+│   └── tests/            #   单元 + 回归测试
+├── skill/                # DSH skill（给 agent 读，见 skill/SKILL.md）
+├── browser-extension/    # 浏览器插件（可选，网页端采集）
+├── install.sh
+└── LICENSE
 ```
 
-## 附加：安装 DSH skill
-
-（可选）把 `skill/` 软链为 DSH skill，供 DSH agent 调用「导出比赛代码 / 查榜单」：
+## 检测器单独用（想直接拿 JSON）
 
 ```bash
-git clone https://github.com/DotRedstone/nowcoder-collect.git
-cd nowcoder-collect
+cd detector
+python3 main.py --contest 143786 --all --json-out report.json   # 全部对（含"排除"）
+python3 -m unittest discover -s tests -v                        # 22 个测试
+```
+
+内核算法（L1/L2/L3 归一化、稀有 n-gram、时间线、分级规则、确定性保证、参考文献）见 [`detector/docs/design.md`](detector/docs/design.md)。
+
+## 给 DSH agent 用（可选）
+
+这是给 DSH agent 装的技能。agent 读 [`skill/SKILL.md`](skill/SKILL.md)（那是 agent 的说明书，含接口逆向记录和 CLI 命令）；人类看本 README 就够。
+
+```bash
 ./install.sh    # 软链到 $DSH_HOME/skills/nowcoder-collect，skill-filesystem 自动发现
 ```
 
-`install.sh` 只是 `ln -s <repo>/skill ~/.dsh/skills/nowcoder-collect`，也可手动：
+## 浏览器插件（可选）
 
-```bash
-ln -s "$(pwd)/skill" ~/.dsh/skills/nowcoder-collect
-```
+Chrome/Edge：`chrome://extensions` → 开发者模式 → 「加载已解压的扩展程序」→ 选 `browser-extension/` 目录。
 
-### 浏览器插件（可选）
+## 说明
 
-1. 打开 `chrome://extensions/`（Edge 为 `edge://extensions/`）
-2. 开启「开发者模式」→「加载已解压的扩展程序」→ 选择 `browser-extension/` 目录
-
-## 爬取器 CLI（skill/scripts/nowcoder_extract.py）
-
-（TUI 内部也是调它，可单独用）
-
-```bash
-cd <repo>/skill
-
-# 列出最近参加的比赛
-python3 scripts/nowcoder_extract.py --recent --uid <你的数字uid>
-
-# 提取某场比赛「比赛期间」代码（默认，推荐用于作弊审查）
-python3 scripts/nowcoder_extract.py --contest 143786 --out ./nowcoder-data
-
-# 含补题的完整数据 / 只取补题
-python3 scripts/nowcoder_extract.py --contest 143786 --phase all
-python3 scripts/nowcoder_extract.py --contest 143786 --phase after
-
-# 查 SQLite 库
-python3 scripts/nowcoder_extract.py --query "select count(*) from submissions where contest_id=143786 and phase='contest'"
-
-# 重建榜单（官方 #rank 赛后常被隐藏，用提交数据按总分重建）
-python3 scripts/nowcoder_extract.py --rank 143786
-```
-
-> ⚠️ 牛客 `status-list` 会返回「比赛期间 + 赛后补题」的全部提交。默认 `--phase contest` 只留比赛期间（按 `startTime <= submitTime <= endTime` 过滤），避免补题污染「比赛期间作弊」的判断。
-
-输出（`<out>/<contestId>/`）：
-
-| 文件 | 内容 |
-| --- | --- |
-| `manifest.json` | 提交元信息 + `startTime/endTime/inContest/afterContest` 统计 |
-| `合集.md` | 全部代码合集，含行数与注释占比 |
-| `相似度.md` | 跨人同题雷同对（Winnowing 指纹，阈值 50%） |
-| `排名.md` | 嫌疑排名（最高跨人相似度 → 雷同对数 → 提交数） |
-| `code/` | 单个源码文件 `{姓名}_{题号}_{语言}.{ext}` |
-| `~/.dsh/nowcoder/nowcoder.db` | SQLite 持久化库 |
-
-## TUI 面板（一体化）
-
-一条命令跑完「登录 → 选比赛 → 爬取 → 分析 → 结果/榜单」：
-
-```bash
-python3 tui.py            # 交互式面板（curses，纯标准库）
-python3 tui.py --check    # 非交互：校验登录并列出比赛
-```
-
-首次使用先在面板里「更新 Cookie」粘贴登录态；之后选比赛即可自动多线程爬取 → 确定性雷同检测 → 浏览结果与榜单。
-
-## 数据库（SQLite）
-
-默认 `~/.dsh/nowcoder/nowcoder.db`（`--db` 可改）。两张表：
-
-```sql
-contests(contest_id, name, start_time, end_time, description)
-submissions(submission_id, contest_id, student, student_id, problem_index, problem_id,
-            problem_title, language, verdict, score, submit_time, phase,
-            code, url, loc, comments, comment_ratio, extracted_at)
-```
-
-`phase` ∈ `contest`（比赛期间）/ `after`（补题）/ `before`。`--query` 可执行任意只读 SQL，例如按人查提交、按题查 AC 数、导出数据。
-
-## 登录 Cookie
-
-推荐 `python3 login.py` 扫码登录（自动写入 `~/.dsh/nowcoder/cookie.txt`）。手动方式三个来源，优先级从高到低：
-
-1. `--cookie "..."`（命令行）
-2. 环境变量 `NOWCODER_COOKIE`
-3. 文件 `~/.dsh/nowcoder/cookie.txt`（建议 `chmod 600`）
-
-获取：登录牛客 → DevTools → Network → 任意 `nowcoder.com` 请求 → Request Headers → 复制整行 `Cookie:`。
-
-> ⚠️ Cookie 等同账号完全控制权。本工具只用 GET 只读、不改账号任何内容；用完建议重登作废旧会话。
-
-## 接口逆向记录（2026-11 实测）
-
-| 用途 | 地址 | 返回 |
-| --- | --- | --- |
-| 最近参加的比赛 | `/acm-heavy/acm/contest/profile/contest-joined-history?uid={uid}&page=1&pageSize=30&onlyJoinedFilter=true&contestEndFilter=true` | JSON `data.dataList[]` |
-| 比赛信息 | `/acm/contest/contest-info?id={contestId}` | JSON `data.name/startTime/endTime/description` |
-| 提交列表 | `/acm/contest/status-list?token=&id={contestId}&page={n}&pageSize=50` | JSON `data.data[]`，`data.basicInfo.pageCount/statusCount` 翻页 |
-| 代码页 | `/acm/contest/view-submission?submissionId={id}` | 服务端渲染 HTML，代码在 `<pre class="prettyprint lang-xxx">` |
-
-提交对象字段：`userName`、`userId`、`submissionId`、`index`（题号 A/B/C）、`problemId`、`languageName`、`statusMessage`、`score`、`submitTime`、`fullScore`、`time`、`memory`、`length`。
-
-注意：`status-list` 含「比赛期间 + 赛后补题」两类提交，需按比赛窗口（`contest-info` 的 `startTime`/`endTime`）过滤。
-
-## 审查说明
-
-- 相似度与注释占比只是**线索**，不是「AI 作弊」的最终判定；结合题目难度、提交时间、代码风格人工判断。
-- 相似度只统计「不同人 + 同一题」的跨人雷同（已排除同一人的重复提交）。
-- 请遵守牛客网平台规则与队员隐私约定，仅用于队伍训练审查。
+- 相似度与注释占比只是**线索**，不是「AI 作弊」的最终判定；请结合题目难度、提交时间、代码风格人工判断。
+- 工具只读牛客数据，不改账号任何内容。
+- 请遵守牛客平台规则与队员隐私约定，仅用于队伍训练审查。
 
 ## License
 
