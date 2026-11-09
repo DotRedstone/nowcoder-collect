@@ -86,6 +86,17 @@ python3 scripts/nowcoder_extract.py --rank 143786
 | `code/` | 单个源码文件 `{姓名}_{题号}_{语言}.{ext}` |
 | `~/.dsh/nowcoder/nowcoder.db` | SQLite 持久化库 |
 
+## TUI 面板（一体化）
+
+一条命令跑完「登录 → 选比赛 → 爬取 → 分析 → 结果/榜单」：
+
+```bash
+python3 tui.py            # 交互式面板（curses，纯标准库）
+python3 tui.py --check    # 非交互：校验登录并列出比赛
+```
+
+首次使用先在面板里「更新 Cookie」粘贴登录态；之后选比赛即可自动多线程爬取 → 确定性雷同检测 → 浏览结果与榜单。
+
 ## 数据库（SQLite）
 
 默认 `~/.dsh/nowcoder/nowcoder.db`（`--db` 可改）。两张表：
