@@ -34,7 +34,7 @@ from review_domain import (
     CONFIG_DIR, DB_PATH, DETECTOR_PATH, EXPORT_DIR, FILTERS_PATH, MARKS, MARK_TEXT,
     PEOPLE_PATH, REPORTS_DIR, SETTINGS_PATH, STAFF_PATH, DEFAULT_FILTERS, DEFAULT_SETTINGS,
     PeopleStore, all_submissions, contest_matches, detector_db, export_ranking, final_rank,
-    hidden_uids, load_filters, load_report, load_settings, load_staff, local_rank,
+    hidden_uids, is_ac, load_filters, load_report, load_settings, load_staff, local_rank,
     people_for_contest, person_submissions, problem_submissions, problems_for_contest,
     rank_source_available,
     representative_for, representatives_by_problem, report_key, save_filters, save_report,
@@ -729,13 +729,29 @@ class ReviewApp(App):
             problem = ctx["problem"]
             all_rows = problem_submissions(cid, problem, self.db())
             reps = representatives_by_problem(all_rows)
+            sort = ctx.setdefault("sort", 0)
+            sort_names = ("UID", "AC 时间", "姓名", "线索数量")
+            if sort == 1:
+                first_ac = {}
+                for sub in all_rows:
+                    if is_ac(sub.get("verdict")):
+                        uid = int(sub["student_id"])
+                        first_ac[uid] = min(first_ac.get(uid, float("inf")), sub.get("submit_time") or float("inf"))
+                reps.sort(key=lambda sub: (first_ac.get(int(sub["student_id"]), float("inf")), sub.get("student") or ""))
+            elif sort == 2:
+                reps.sort(key=lambda sub: (sub.get("student") or "", int(sub["student_id"])))
+            elif sort == 3:
+                suspicious = Counter(uid for row in self.report_for(cid).get("results", [])
+                                     for uid in row.get("student_ids", []) if row.get("problem") == problem)
+                reps.sort(key=lambda sub: (-suspicious[int(sub["student_id"])], sub.get("student") or ""))
             entries = [({"index": i, "submission": sub}, (
                 self._paint(sub.get("student") or str(sub["student_id"])),
                 str(sub["student_id"]), str(sub.get("verdict") or ""), f"{float(sub.get('score') or 0):.2f}",
                 self._mark(int(sub["student_id"]), cid))) for i, sub in enumerate(reps)]
             ctx["sequence"] = reps
-            self._show(page, f"{problem} 题 · 代表提交",
-                       f"共 {len(all_rows)} 次提交，{len(reps)} 位选手。\nEnter 浏览代码；之后 n/p 同题换人，[ / ] 看该人的历史版本。",
+            self._show(page, f"{problem} 题 · 代表提交 · {sort_names[sort]}",
+                       f"共 {len(all_rows)} 次提交，{len(reps)} 位选手。按 g 切换排序。\n"
+                       "Enter 浏览代码；之后 n/p 同题换人，方括号切该人的历史版本。",
                        ("选手", "UID", "结果", "得分", "标记"), entries)
         elif kind == "ranking":
             rank = local_rank(cid, self.db())
@@ -959,6 +975,9 @@ class ReviewApp(App):
         page = self.current_page()
         if page and page.kind == "findings":
             self.finding_group = 1 - self.finding_group
+            self.render_page(page)
+        elif page and page.kind == "problem":
+            page.context["sort"] = (page.context.get("sort", 0) + 1) % 4
             self.render_page(page)
         else:
             self.action_top()
