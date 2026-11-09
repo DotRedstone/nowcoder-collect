@@ -22,17 +22,20 @@
 ```bash
 git clone https://github.com/DotRedstone/nowcoder-collect.git
 cd nowcoder-collect
+python3 login.py          # 终端扫码登录：显示二维码，微信「扫一扫」自动保存 Cookie
 python3 tui.py            # 一体化面板：登录 → 选比赛 → 爬取 → 分析 → 结果/榜单
 python3 tui.py --check    # 非交互：校验登录并列出比赛
 ```
 
-首次使用在面板里「更新 Cookie」粘贴牛客登录态（`~/.dsh/nowcoder/cookie.txt`）即可。
+首次登录：`python3 login.py` 在终端渲染二维码（纯标准库 QR 编码器，无需装任何东西），微信扫码即登录；也可在 TUI 面板里选「扫码登录」，或手动粘贴 Cookie 到 `~/.dsh/nowcoder/cookie.txt`。
 
 ## 目录结构
 
 ```
 nowcoder-collect/
 ├── tui.py                        # ★ TUI 面板（主入口）
+├── login.py                      # ★ 终端扫码登录（微信，纯标准库）
+├── qr.py                         #   极简 QR 编码器（纯标准库）
 ├── detector/                     # ★ 去 LLM 化确定性雷同检测器
 │   ├── main.py                   #   python main.py --contest 143786
 │   ├── config.toml               #   阈值配置
@@ -50,7 +53,9 @@ nowcoder-collect/
 
 ## 附加：安装 DSH skill
 
-（可选）把 `skill/` 软链为 DSH skill，供 DSH agent 调用「导出比赛代码 / 查榜单」：```bash
+（可选）把 `skill/` 软链为 DSH skill，供 DSH agent 调用「导出比赛代码 / 查榜单」：
+
+```bash
 git clone https://github.com/DotRedstone/nowcoder-collect.git
 cd nowcoder-collect
 ./install.sh    # 软链到 $DSH_HOME/skills/nowcoder-collect，skill-filesystem 自动发现
@@ -130,7 +135,7 @@ submissions(submission_id, contest_id, student, student_id, problem_index, probl
 
 ## 登录 Cookie
 
-接口需要牛客登录态 Cookie。三个来源，优先级从高到低：
+推荐 `python3 login.py` 扫码登录（自动写入 `~/.dsh/nowcoder/cookie.txt`）。手动方式三个来源，优先级从高到低：
 
 1. `--cookie "..."`（命令行）
 2. 环境变量 `NOWCODER_COOKIE`

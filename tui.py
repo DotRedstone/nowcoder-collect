@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(REPO, "skill", "scripts"))
 sys.path.insert(0, os.path.join(REPO, "detector"))
 
 import nowcoder_extract as ex          # noqa: E402
+import login                           # noqa: E402
 from main import detect as run_detect  # noqa: E402
 from main import load_config           # noqa: E402
 
@@ -123,6 +124,9 @@ class Tui:
         self.msg = ""
         self.contest_id = None
         self.contest_name = ""
+        self.login_qr = ""
+        self.login_status = ""
+        self.login_done = False
 
     # ---- 工具 ----
     def h(self):
@@ -170,7 +174,8 @@ class Tui:
         self.scr.addstr(3, 2, f"Cookie 文件: {COOKIE_FILE}")
         self.scr.addstr(4, 2, f"数据库:     {DB_FILE}")
         self.scr.addstr(6, 2, "── 操作 ──", curses.A_BOLD)
-        items = ["选择比赛并分析（登录→爬取→检测）", "分析已爬取的比赛（直接用数据库）", "查看榜单", "更新登录 Cookie", "退出"]
+        items = ["选择比赛并分析（登录→爬取→检测）", "分析已爬取的比赛（直接用数据库）",
+                 "查看榜单", "扫码登录（微信）", "手动粘贴 Cookie", "退出"]
         for i, s in enumerate(items):
             y = 8 + i
             attr = curses.A_REVERSE if i == self.menu_idx else curses.A_NORMAL
@@ -262,6 +267,8 @@ class Tui:
                 self.draw_detail()
             elif self.state == "rank":
                 self.draw_rank()
+            elif self.state == "login":
+                self.draw_login()
             self.scr.refresh()
             key = self.scr.getch()
             self.handle(key)
@@ -271,9 +278,9 @@ class Tui:
     def handle(self, key):
         if self.state == "menu":
             if key in (curses.KEY_UP, ord("k")):
-                self.menu_idx = (self.menu_idx - 1) % 5
+                self.menu_idx = (self.menu_idx - 1) % 6
             elif key in (curses.KEY_DOWN, ord("j")):
-                self.menu_idx = (self.menu_idx + 1) % 5
+                self.menu_idx = (self.menu_idx + 1) % 6
             elif key in (curses.KEY_ENTER, 10, 13):
                 self.menu_action()
             elif key in (ord("q"), 27):
@@ -325,6 +332,11 @@ class Tui:
                 self.rank_scroll += 1
             elif key in (ord("q"), 27):
                 self.state = "results"
+        elif self.state == "login":
+            if self.login_done:
+                self.state = "menu"
+            elif key in (ord("q"), 27):
+                self.state = "menu"
 
     def menu_action(self):
         if self.menu_idx == 0:       # 选择比赛并分析
@@ -348,13 +360,15 @@ class Tui:
             self.status = {}
             threading.Thread(target=build_rank, args=(self.contest_id, self.status), daemon=True).start()
             self.state = "rank"
-        elif self.menu_idx == 3:     # 更新 Cookie
+        elif self.menu_idx == 3:     # 扫码登录
+            self.start_login()
+        elif self.menu_idx == 4:     # 手动粘贴 Cookie
             c = self.input_text("粘贴牛客登录 Cookie（DevTools→Network→请求头→Cookie 整行）")
             if c:
                 save_cookie(c)
                 self.cookie = c
                 self.msg = "Cookie 已保存"
-        elif self.menu_idx == 4:
+        elif self.menu_idx == 5:
             self.state = "quit"
 
     def start_workflow(self):
@@ -377,8 +391,42 @@ class Tui:
 
         threading.Thread(target=work, daemon=True).start()
 
+    def start_login(self):
+        """微信扫码登录：后台跑，渲染二维码 + 轮询。"""
+        self.state = "login"
+        self.login_qr = "获取二维码中…"
+        self.login_status = ""
+        self.login_done = False
 
-def main(stdscr):
+        def render(t):
+            self.login_qr = t
+
+        def status(m):
+            self.login_status = m
+
+        def work():
+            try:
+                cookie = login.login_flow(render_cb=render, status_cb=status)
+                login.save_cookie(cookie)
+                self.cookie = cookie
+                self.login_status = "登录成功 ✓"
+                self.msg = "登录成功"
+            except Exception as e:
+                self.login_status = f"登录失败：{e}"
+                self.msg = f"登录失败：{e}"
+            self.login_done = True
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def draw_login(self):
+        self.scr.clear()
+        self.title("扫码登录（微信）")
+        lines = (self.login_qr or "").splitlines()
+        h = self.h()
+        for i, ln in enumerate(lines[: h - 3]):
+            self.scr.addstr(i, 0, ln[: self.w() - 1])
+        self.scr.addstr(h - 2, 0, ("状态：" + (self.login_status or ""))[: self.w() - 1])
+        self.footer(["q 取消返回"])
     Tui(stdscr).run()
 
 
