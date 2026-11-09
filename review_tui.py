@@ -569,21 +569,40 @@ class ReviewApp(App):
                     continue
                 label = "规则外" if not allowed else ("本地" if contest.get("codes") else "未采集")
                 label += " · 手动" if manual else ""
+                timestamp = contest.get("start_time") or 0
+                try:
+                    timestamp = float(timestamp)
+                    date = datetime.fromtimestamp(timestamp / (1000 if timestamp > 1e11 else 1)).strftime("%m-%d") if timestamp else "—"
+                except (OverflowError, ValueError, TypeError, OSError):
+                    date = "—"
+                report = self.report_for(int(contest["contest_id"]))
+                clues = report.get("results", [])
+                summary = Counter(c.get("verdict", "") for c in clues)
+                reviewed = sum(self.reviews.status(case_key(int(contest["contest_id"]), "contest", case)) != "待复核" for case in clues)
+                progress = f"{reviewed}/{len(clues)}" if report.get("meta") else "—"
+                label += " · 已分析" if report.get("meta") else ""
                 entries.append(({"cid": contest["contest_id"], "name": contest.get("name", "")}, (
                     self._paint(contest.get("name") or f"比赛 #{contest['contest_id']}"),
-                    str(contest["contest_id"]), str(contest.get("submissions", 0)), label)))
+                    str(contest["contest_id"]), date, str(contest.get("submissions", 0)),
+                    label, f"{summary['实锤']}/{summary['中偏强']}/{summary['存疑']}" if clues else "—",
+                    progress)))
             count = sum(contest_matches(c, self.filters) for c in all_rows)
             self._show(page, f"比赛列表 · 筛选 {count}/{len(all_rows)}",
                 "F：仅显示符合规则 / 全部（手动打开的比赛始终保留）\n"
-                "此处展示本地已采集比赛和已加入的在线比赛，不代表学校全部比赛。",
-                ("比赛", "ID", "提交", "来源"), entries)
+                "线索数量 H/M/L 分别对应实锤/中偏强/存疑。在线列表仅代表当前账户加入的比赛。",
+                ("比赛", "ID", "日期", "提交", "状态", "H/M/L", "复核"), entries)
         elif kind == "contest":
             subs = all_submissions(cid, self.db())
             report = self.report_for(cid)
             counts = Counter(r.get("verdict") for r in report.get("results", []))
             active_people = len({int(s.get("student_id") or 0) for s in subs if int(s.get("student_id") or 0) not in self.staff_ids()})
+            uids = {int(sub.get("student_id") or 0) for sub in subs} - self.staff_ids()
+            uids.discard(0)
+            people_counts = Counter(self.people.get(cid, uid).get("mark", "unreviewed") for uid in uids)
             summary = (f"参赛者 {active_people}   提交 {len(subs)}   检测比较 {report.get('meta', {}).get('pairs_compared', '未分析')} 对\n"
                        f"线索：实锤 {counts['实锤']} · 中偏强 {counts['中偏强']} · 存疑 {counts['存疑']}\n"
+                       f"人工：正常 {people_counts['normal']} · 存疑 {people_counts['suspect']} · "
+                       f"作弊者 {people_counts['cheater']} · 未看 {people_counts['unreviewed']}\n"
                        f"管理人员已从检测输入排除：{len(self.staff_ids())} 人\n")
             entries = [(dict(action=action), (self._paint(name), detail)) for name, action, detail in (
                 ("线索", "findings", "逐条核验证据"),
