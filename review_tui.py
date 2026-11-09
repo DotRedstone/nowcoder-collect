@@ -169,6 +169,15 @@ class ReviewApp(App):
         yield Static(" NORMAL  ·  ready", id="status")
         yield Static(" 1/2/3 panes   j/k move   / search   f filter   : commands   a analyze   c collect   x review   ? help", id="keybar")
 
+    def on_key(self, event):
+        if not isinstance(self.focused, DataTable): return
+        if event.key == "j":
+            self.focused.action_cursor_down()
+            event.stop()
+        elif event.key == "k":
+            self.focused.action_cursor_up()
+            event.stop()
+
     def on_mount(self):
         self.theme = os.environ.get("NOWCODER_THEME") or os.environ.get("TEXTUAL_THEME") or "ansi-dark"
         self.query_one("#contests", DataTable).add_columns("比赛", "提交", "代码")
@@ -229,13 +238,9 @@ class ReviewApp(App):
         if event.input.id == "search":
             self.filter_cases()
 
-    def on_select_changed(self, event: Select.Changed):
-        if event.select.id == "level":
-            self.filter_cases()
-
     def filter_cases(self):
         search = self.query_one("#search", Input).value.strip().casefold()
-        level = self.query_one("#level", Select).value
+        level = self.FILTERS[self.filter_idx][0]
         self.filtered_cases = []
         for case in self.cases:
             state = self.store.status(case_key(self.contest, "contest", case))
@@ -294,61 +299,176 @@ class ReviewApp(App):
         except Exception as e:
             self.status(f"保存失败：{e}")
 
-    def on_button_pressed(self, event: Button.Pressed):
-        actions = {
-            "refresh": self.action_refresh, "collect": self.action_collect, "analyze": self.action_analyze,
-            "rank": self.action_rank, "login": self.action_toggle_login,
-            "start-login": self.start_login, "close-login": self.action_back,
-            "cookie-help": self.cookie_help,
-            "open-contest": self.open_contest_id, "save-uid": self.save_uid,
-            "review": lambda: self.mark("已核查"), "dismiss": lambda: self.mark("无需跟进"),
-            "investigate": lambda: self.mark("需进一步核实"),
-        }
-        action = actions.get(event.button.id)
-        if action: action()
+
+    def apply_layout(self):
+        width = self.size.width
+        panes = [self.query_one("#left"), self.query_one("#middle"), self.query_one("#right")]
+        if width < 80:
+            for i, pane in enumerate(panes):
+                pane.display = i == self.active_pane
+                pane.styles.width = "100%"
+        elif width < 116:
+            for i, pane in enumerate(panes):
+                pane.display = i != 2
+            panes[0].styles.width = "40%"
+            panes[1].styles.width = "60%"
+        else:
+            for pane in panes:
+                pane.display = True
+            panes[0].styles.width = "25%"
+            panes[1].styles.width = "38%"
+            panes[2].styles.width = "37%"
+
+    def on_resize(self, event):
+        self.apply_layout()
+
+    def focus_pane(self, index):
+        self.active_pane = index
+        self.apply_layout()
+        target = ("#contests", "#findings", "#code-a")[index]
+        self.query_one(target).focus()
+
+    def action_pane_1(self): self.focus_pane(0)
+    def action_pane_2(self): self.focus_pane(1)
+    def action_pane_3(self): self.focus_pane(2)
 
     def action_help(self):
-        self.status("Tab 切换面板 · 方向键选中 · / 搜索 · a 分析 · c 采集 · r 刷新 · Ctrl+T 登录 · Ctrl+X 取消 · q 退出")
+        self.status("1/2/3 panes · j/k move · / search · f filter · : commands · a analyze · c collect · x/d review · l login · i ID · t theme · q quit")
 
     def action_search(self):
-        if not self.login_visible: self.query_one("#search", Input).focus()
+        if not self.login_visible:
+            field = self.query_one("#search", Input)
+            field.display = True
+            field.focus()
+
+    def action_filter(self):
+        self.filter_idx = (self.filter_idx + 1) % len(self.FILTERS)
+        self.query_one("#filterline", Static).update(
+            f" {self.FILTERS[self.filter_idx][1]}  ·  f to filter")
+        self.filter_cases()
+
+    def action_command(self):
+        if self.login_visible: return
+        self.query_one("#command-row").display = True
+        field = self.query_one("#command", Input)
+        field.value = ""
+        field.focus()
+
+    def action_open_id(self):
+        if self.login_visible: return
+        self.query_one("#id-row").display = True
+        field = self.query_one("#contest-input", Input)
+        field.value = ""
+        field.focus()
+
+    def on_input_submitted(self, event: Input.Submitted):
+        name = event.input.id
+        if name == "contest-input":
+            self.open_contest_id()
+            self.query_one("#id-row").display = False
+            self.focus_pane(0)
+        elif name == "uid-input":
+            self.save_uid()
+        elif name == "command":
+            cmd = event.input.value.strip()
+            self.query_one("#command-row").display = False
+            self.focus_pane(self.active_pane)
+            self.execute_command(cmd)
+        elif name == "search":
+            self.query_one("#search").display = False
+            self.focus_pane(1)
+
+    def execute_command(self, command):
+        pieces = command.split()
+        if not pieces: return
+        op = pieces[0].lower().lstrip(":")
+        actions = {
+            "help": self.action_help, "refresh": self.action_refresh,
+            "collect": self.action_collect, "analyze": self.action_analyze,
+            "rank": self.action_rank, "login": self.action_toggle_login,
+            "scan": self.action_scan,
+        }
+        if op in actions:
+            actions[op]()
+        elif op in ("contest", "id") and len(pieces) == 2:
+            self.query_one("#contest-input", Input).value = pieces[1]
+            self.open_contest_id()
+        elif op == "theme" and len(pieces) == 2:
+            if pieces[1] in self.available_themes:
+                self.theme = pieces[1]
+                self.status(f"theme: {self.theme}")
+            else:
+                self.status(f"Unknown theme: {pieces[1]}")
+        else:
+            self.status(f"Unknown command: {command} · :help")
+
+    def action_theme(self):
+        themes = [name for name in self.THEMES if name in self.available_themes]
+        if not themes: return
+        try: index = (themes.index(self.theme) + 1) % len(themes)
+        except ValueError: index = 0
+        self.theme = themes[index]
+        self.status(f"theme: {self.theme}")
+
+    def action_scan(self):
+        if not self.login_visible: self.action_toggle_login()
+        self.start_login()
+
+    def action_mark_reviewed(self):
+        if not self.login_visible: self.mark("已核查")
+
+    def action_mark_dismissed(self):
+        if not self.login_visible: self.mark("无需跟进")
+
+    def action_mark_investigate(self):
+        if not self.login_visible: self.mark("需进一步核实")
 
     def action_toggle_login(self):
         self.login_visible = not self.login_visible
         self.query_one("#workspace").display = not self.login_visible
-        self.query_one("#toolbar").display = not self.login_visible
         self.query_one("#login-panel").display = self.login_visible
+        if self.login_visible:
+            self.query_one("#uid-input", Input).value = read_secret(UID_PATH)
+            self.query_one("#uid-input", Input).focus()
+        else:
+            self.focus_pane(0)
 
     def action_back(self):
-        if self.login_visible: self.action_toggle_login()
+        if self.query_one("#command-row").display:
+            self.query_one("#command-row").display = False
+            self.focus_pane(self.active_pane)
+        elif self.query_one("#id-row").display:
+            self.query_one("#id-row").display = False
+            self.focus_pane(0)
+        elif self.login_visible:
+            self.action_toggle_login()
+        else:
+            self.query_one("#search", Input).display = False
+            self.focus_pane(self.active_pane)
 
     def open_contest_id(self):
         text = self.query_one("#contest-input", Input).value.strip()
         if not text.isdecimal() or int(text) <= 0:
-            self.status("请输入有效的正整数比赛 ID。")
+            self.status("Enter a positive integer contest ID")
             return
         cid = int(text)
         if not any(c["contestId"] == cid for c in self.remote):
-            self.remote.append({"contestId": cid, "contestName": f"手动添加的比赛 #{cid}"})
+            self.remote.append({"contestId": cid, "contestName": f"比赛 #{cid}"})
         self.load_contests()
         self.choose(cid)
-        self.status(f"已打开比赛 #{cid}。按 c 采集，或 a 分析本地数据。")
+        self.status(f"Contest #{cid} · c collect · a analyze local data")
 
     def save_uid(self):
-        text = self.query_one("#uid-input", Input).value.strip()
-        if not text.isdecimal() or int(text) <= 0:
-            self.query_one("#login-message", Static).update("UID 必须是正整数，可从牛客用户主页地址获取。")
+        value = self.query_one("#uid-input", Input).value.strip()
+        if not value.isdecimal() or int(value) <= 0:
+            self.query_one("#login-message", Static).update("UID must be a positive number")
             return
         try:
-            write_secret(UID_PATH, text)
-            self.query_one("#login-message", Static).update("UID 已保存。")
+            write_secret(UID_PATH, value)
+            self.query_one("#login-message", Static).update("UID saved")
             self.action_refresh()
         except Exception as e:
-            self.query_one("#login-message", Static).update(f"UID 保存失败：{e}")
-
-    def cookie_help(self):
-        self.query_one("#login-message", Static).update(
-            f"可手动将 Cookie 保存至 {COOKIE_PATH}（0600 权限），用户 UID 保存至 {UID_PATH}。不要把凭据提交进 Git。")
+            self.query_one("#login-message", Static).update(f"Unable to save UID: {e}")
 
     def start_login(self):
         if self.login_active:
