@@ -129,11 +129,11 @@ class Page(Screen):
             yield Static("", id="overview")
             yield DataTable(id="list", cursor_type="row", cell_padding=0)
             with TabbedContent(id="source-pair"):
-                with TabPane("源码 A ↔ B"):
+                with TabPane("源码 A ↔ B", id="tab-pair"):
                     with Horizontal():
                         yield TextArea("", id="source-a", read_only=True, show_line_numbers=True)
                         yield TextArea("", id="source-b", read_only=True, show_line_numbers=True)
-                with TabPane("Diff"):
+                with TabPane("Diff", id="tab-diff"):
                     yield TextArea("", id="source-diff", read_only=True, show_line_numbers=True)
             yield TextArea("", id="code", read_only=True, show_line_numbers=True)
             yield Static("", id="qr")
@@ -211,12 +211,12 @@ class ReviewApp(App):
     BINDINGS = [
         Binding("q", "quit_safe", "退出", show=False),
         Binding("escape", "back", "返回", show=False),
-        Binding("h", "back", "返回", show=False),
-        Binding("l", "enter", "进入", show=False),
+        Binding("h", "back_or_adjust", "返回或调整", show=False),
+        Binding("l", "enter_or_adjust", "进入或调整", show=False),
         Binding("enter", "enter", "进入", show=False),
         Binding("j", "down", "下移", show=False),
         Binding("k", "up", "上移", show=False),
-        Binding("g", "top", "顶部", show=False),
+        Binding("g", "group_or_top", "分组或顶部", show=False),
         Binding("shift+g", "bottom", "底部", show=False),
         Binding("slash", "search", "搜索", show=False),
         Binding("colon", "command", "命令", show=False),
@@ -237,6 +237,7 @@ class ReviewApp(App):
         Binding("left", "option_previous", "上一选项", show=False),
         Binding("right", "option_next", "下一选项", show=False),
         Binding("space", "toggle", "切换", show=False),
+        Binding("tab", "tab_key", "切换 Diff", show=False),
         Binding("e", "edit", "编辑", show=False),
         Binding("s", "scan", "扫码", show=False),
         Binding("ctrl+s", "save", "保存", show=False),
@@ -260,6 +261,7 @@ class ReviewApp(App):
         self.spinner_tick = 0
         self.show_all_contests = False
         self.finding_filter = 0
+        self.finding_group = 0
         self.people_filter = 0
         self.nerd_font = False
         self.login_running = False
@@ -507,7 +509,10 @@ class ReviewApp(App):
         elif kind == "findings":
             report = self.report_for(cid)
             entries = []
-            for case in report.get("results", []):
+            raw_cases = list(report.get("results", []))
+            if self.finding_group:
+                raw_cases.sort(key=lambda case: (case.get("problem", ""), case.get("verdict", "")))
+            for case in raw_cases:
                 if self.staff_ids().intersection(int(uid) for uid in case.get("student_ids", [])):
                     continue
                 state = self.reviews.status(case_key(cid, "contest", case))
@@ -526,7 +531,8 @@ class ReviewApp(App):
                     f"{case['scores'].get('L2', 0):.2f}/{case['scores'].get('L3', 0):.2f}",
                     state)))
             level = ("全部", "高优先级", "未处理", "已处理")[self.finding_filter]
-            self._show(page, f"雷同线索 · {level}",
+            group_name = "按题" if self.finding_group else "按等级"
+            self._show(page, f"雷同线索 · {level} · {group_name}",
                 "相似度只是审查线索，不能据此直接认定作弊。\nf 切换过滤，Enter 查看证据，x/d/! 记录处理状态。",
                 ("等级", "题", "选手对", "L2/L3", "复核"), entries)
         elif kind == "evidence":
@@ -856,6 +862,36 @@ class ReviewApp(App):
                 self.pop_page(); self.pop_page()
             else:
                 self.pop_page()
+
+    def action_back_or_adjust(self):
+        page = self.current_page()
+        if page and page.kind == "settings_section":
+            self.adjust_option(-1)
+        else:
+            self.action_back()
+
+    def action_enter_or_adjust(self):
+        page = self.current_page()
+        if page and page.kind == "settings_section":
+            self.adjust_option(1)
+        else:
+            self.action_enter()
+
+    def action_group_or_top(self):
+        page = self.current_page()
+        if page and page.kind == "findings":
+            self.finding_group = 1 - self.finding_group
+            self.render_page(page)
+        else:
+            self.action_top()
+
+    def action_tab_key(self):
+        page = self.current_page()
+        if page and page.kind == "evidence":
+            tabs = page.query_one("#source-pair", TabbedContent)
+            tabs.active = "tab-diff" if tabs.active == "tab-pair" else "tab-pair"
+        else:
+            self.focus_next()
 
     def action_back(self) -> None:
         page = self.current_page()
