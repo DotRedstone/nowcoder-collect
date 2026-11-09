@@ -238,6 +238,15 @@ class ReviewApp(App):
         else:
             self.status("本地数据可离线使用 · 如需远程比赛请登录。")
 
+    @staticmethod
+    def rich_color(value: str | None, fallback: str = "white") -> str:
+        """Textual's ansi_* tokens must be converted before Rich parses styles."""
+        if not value or value == "ansi_default":
+            return fallback
+        if value.startswith("ansi_"):
+            return value[5:]
+        return value
+
     def apply_theme(self, requested: str) -> None:
         """Auto and wallpaper modes fall back cleanly to the terminal palette."""
         if requested in ("auto", "wallpaper"):
@@ -307,8 +316,8 @@ class ReviewApp(App):
         self._spinner_tick += 1
         mode, semantic = self._mode()
         theme = self.current_theme
-        color = getattr(theme, semantic, None) or theme.accent or "#7aa2f7"
-        bg = theme.background or "#111111"
+        color = self.rich_color(getattr(theme, semantic, None) or theme.accent, "green")
+        bg = self.rich_color(theme.background, "black")
         separator = "" if self._nerd_font else "▌"
         label = ("◐◓◑◒"[self._spinner_tick % 4] + " ") if self.running else ""
         left = Text()
@@ -349,7 +358,7 @@ class ReviewApp(App):
         login = "已保存 Cookie" if read_secret(COOKIE_PATH) else "未登录 / 可离线使用"
         logo = Text()
         for line in ("   ▄▄  ▄▄", "  █  ██  █  nowcoder", "   ▀▀  ▀▀   review"):
-            logo.append(line + "\n", style=self.current_theme.accent or "cyan")
+            logo.append(line + "\n", style=self.rich_color(self.current_theme.accent, "cyan"))
         logo.append("\n  contests  ", style="dim")
         logo.append(f"{len(self.contests)}\n")
         logo.append("  codes     ", style="dim")
@@ -426,11 +435,11 @@ class ReviewApp(App):
             "存疑": ("LOW", self.current_theme.foreground),
         }
         label, color = severity.get(verdict, ("—", self.current_theme.foreground))
-        color = color or "#aaaaaa"
+        color = self.rich_color(color, "white")
         l3 = float(case.get("scores", {}).get("L3", 0) or 0)
         n = max(0, min(4, round(l3 * 4)))
         marker = Text("▎" if selected else " ")
-        marker.stylize(self.current_theme.accent or "cyan")
+        marker.stylize(self.rich_color(self.current_theme.accent, "cyan"))
         marker.append("● ", style=f"bold {color}" if label != "LOW" else "dim")
         marker.append(label + " ", style=f"{color}" if label != "LOW" else "dim")
         marker.append("▮" * n + "▯" * (4 - n), style=color)
@@ -438,7 +447,7 @@ class ReviewApp(App):
 
     def _review_cell(self, state: str) -> Text:
         style = {
-            "已核查": str(self.current_theme.success or "green"),
+            "已核查": self.rich_color(self.current_theme.success, "green"),
             "需进一步核实": "magenta",
             "无需跟进": "dim",
             "待复核": "dim",
