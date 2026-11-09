@@ -77,5 +77,68 @@ class ScreenTests(unittest.TestCase):
         asyncio.run(run())
 
 
+    def test_settings_categories_and_ranking_screen_mount(self):
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                with patch("review_tui.read_secret", return_value=""), patch(
+                    "review_tui.local_contests", return_value=[]
+                ), patch("review_tui.local_rank", return_value=[
+                    {"rank": 1, "uid": 1, "name": "甲", "ac": 2, "total": 150},
+                    {"rank": 2, "uid": 2, "name": "乙", "ac": 1, "total": 100},
+                ]), patch("review_tui.PeopleStore", return_value=PeopleStore(Path(directory) / "people.json")):
+                    app = ReviewApp()
+                    async with app.run_test(size=(110, 34)) as pilot:
+                        await pilot.pause()
+                        app.push_page("settings", "设置")
+                        await pilot.pause()
+                        self.assertEqual(app.screen.kind, "settings")
+                        self.assertGreater(app.screen.query_one("#list").row_count, 5)
+                        app.push_page("settings_section", "外观", section="外观")
+                        await pilot.pause()
+                        self.assertEqual(app.screen.kind, "settings_section")
+                        app.action_option_next()
+                        await pilot.pause()
+                        app.action_back()
+                        await pilot.pause()
+                        self.assertEqual(app.screen.kind, "confirm")
+                        app.action_enter()
+                        await pilot.pause()
+                        self.assertEqual(app.screen.kind, "settings")
+                        app.push_page("ranking", "排行榜", cid=5)
+                        await pilot.pause()
+                        self.assertEqual(app.screen.kind, "ranking")
+                        self.assertEqual(app.screen.query_one("#list").row_count, 7)
+                        self.assertIn("本地推算", app.screen.query_one("#frame").border_title)
+        asyncio.run(run())
+
+    def test_evidence_source_and_tab(self):
+        async def run():
+            case = {
+                "pair": ["甲", "乙"], "student_ids": [1, 2], "problem": "B",
+                "language": "cpp", "verdict": "存疑",
+                "scores": {"L1": 0.8, "L2": 0.85, "L3": 0.91, "md5_ws_equal": False},
+                "rare": {"score": 0.42, "shared": 2, "samples": ["for int"]},
+                "timeline": {"first_submit_delta": 5, "later_failures_before_ac": 1, "error_types": ["WA"]},
+                "template_ratio": 0.1, "crowd_count": 1,
+            }
+            with patch("review_tui.read_secret", return_value=""), patch(
+                "review_tui.local_contests", return_value=[]
+            ), patch("review_tui.pair_sources", return_value=(
+                {"student": "甲", "submission_id": 101, "code": "int a=1;\n"},
+                {"student": "乙", "submission_id": 102, "code": "int a=2;\n"},
+            )):
+                app = ReviewApp()
+                async with app.run_test(size=(125, 38)) as pilot:
+                    await pilot.pause()
+                    app.push_page("evidence", "证据", cid=5, case=case)
+                    await pilot.pause()
+                    self.assertTrue(app.screen.query_one("#source-pair").display)
+                    self.assertIn("int a=1", app.screen.query_one("#source-a").text)
+                    app.action_tab_key()
+                    await pilot.pause()
+                    self.assertEqual(app.screen.query_one("#source-pair").active, "tab-diff")
+        asyncio.run(run())
+
+
 if __name__ == "__main__":
     unittest.main()
