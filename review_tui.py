@@ -11,6 +11,7 @@ import difflib
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 from collections import Counter
@@ -168,6 +169,7 @@ class Page(Screen):
 
     def show_rows(self, columns: tuple[str, ...], rows: list[tuple[dict, tuple]]) -> None:
         table = self.query_one("#list", DataTable)
+        table.cell_padding = 0 if self.app.settings.get("density", "紧凑") == "紧凑" else 1
         self.rows = [item for item, _ in rows]
         table.clear(columns=True)
         table.add_columns(*columns)
@@ -491,6 +493,18 @@ class ReviewApp(App):
         page.query_one("#list", DataTable).focus()
 
     def render_page(self, page: Page) -> None:
+        """Keep recoverable local database/config errors inside the active screen."""
+        try:
+            self._render_page(page)
+        except (sqlite3.Error, OSError, ValueError, KeyError) as error:
+            self._status = f"本地数据读取失败：{error}"
+            page.query_one("#frame").border_title = "读取失败"
+            page.query_one("#overview", Static).update(Text(
+                f"无法读取当前页面数据：{error}\n原数据库未被修改。按 h 返回上一层，检查数据库/配置后重试。"))
+            page.show_rows(("错误",), [])
+            self.update_statusline()
+
+    def _render_page(self, page: Page) -> None:
         kind, ctx = page.kind, page.context
         cid = ctx.get("cid")
         if kind == "home":
@@ -1323,6 +1337,9 @@ class ReviewApp(App):
             self.review_case("无需跟进")
 
     def save_all(self):
+        if self.running:
+            self.set_status("后台任务运行中，暂不允许变更并保存检测配置；请先完成或取消任务。")
+            return False
         try:
             validate_filters(self.filters_draft)
             # No change to bundled detector/config.toml.
