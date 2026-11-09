@@ -1,0 +1,2 @@
+-r requirements-tui.txt
+textual[syntax]>=0.80,<9
