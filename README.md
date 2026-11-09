@@ -16,7 +16,7 @@ python3 tui.py      # ② 打开面板：选比赛 → 爬取 → 分析 → 结
 
 整条流程在 TUI 面板里一条龙完成：
 
-1. **登录**：`python3 login.py` 在终端渲染二维码，微信「扫一扫」即登录（Cookie 存 `~/.dsh/nowcoder/cookie.txt`）。也可打开 `python3 tui.py` 后在菜单里选「扫码登录」。
+1. **登录**：`python3 login.py` 在终端渲染二维码，微信「扫一扫」即登录（Cookie 存 `~/.dsh/nowcoder/cookie.txt`）。二维码优先用 `qrencode` 渲染，没装则自动通过 `nix-shell` 拉取或走在线 QR 服务兜底。也可打开 `python3 tui.py` 后在菜单里选「扫码登录」。
 2. **选比赛**：菜单「选择比赛并分析」→ 列出你参加的比赛 → `↑↓` 选一个。
 3. **爬取**：自动多线程抓取该场**比赛期间**的全部提交（代码 + 姓名 + 题号 + 语言 + 结果 + 得分 + 时间），写入 SQLite。
 4. **分析**：去 LLM 化确定性雷同检测，同题两两比较。
@@ -39,7 +39,6 @@ python3 tui.py      # ② 打开面板：选比赛 → 爬取 → 分析 → 结
 nowcoder-collect/
 ├── login.py              # 终端扫码登录（微信）
 ├── tui.py                # 一体化 TUI 面板（主入口）
-├── qr.py                 # 极简 QR 编码器（纯标准库）
 ├── detector/             # 去 LLM 化确定性雷同检测器
 │   ├── main.py           #   python main.py --contest 143786
 │   ├── config.toml       #   阈值配置（可调）
