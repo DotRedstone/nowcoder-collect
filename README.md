@@ -54,19 +54,42 @@ cd <repo>/skill
 # 列出最近参加的比赛
 python3 scripts/nowcoder_extract.py --recent --uid <你的数字uid>
 
-# 提取某场比赛全部代码
-python3 scripts/nowcoder_extract.py --contest 143786 --name "ACM-第一次训练赛" --out ./nowcoder-data
+# 提取某场比赛「比赛期间」代码（默认，推荐用于作弊审查）
+python3 scripts/nowcoder_extract.py --contest 143786 --out ./nowcoder-data
+
+# 含补题的完整数据 / 只取补题
+python3 scripts/nowcoder_extract.py --contest 143786 --phase all
+python3 scripts/nowcoder_extract.py --contest 143786 --phase after
+
+# 查 SQLite 库
+python3 scripts/nowcoder_extract.py --query "select count(*) from submissions where contest_id=143786 and phase='contest'"
 ```
+
+> ⚠️ 牛客 `status-list` 会返回「比赛期间 + 赛后补题」的全部提交。默认 `--phase contest` 只留比赛期间（按 `startTime <= submitTime <= endTime` 过滤），避免补题污染「比赛期间作弊」的判断。
 
 输出（`<out>/<contestId>/`）：
 
 | 文件 | 内容 |
 | --- | --- |
-| `manifest.json` | 全部提交元信息（姓名/题号/语言/结果/得分/时间/URL） |
+| `manifest.json` | 提交元信息 + `startTime/endTime/inContest/afterContest` 统计 |
 | `合集.md` | 全部代码合集，含行数与注释占比 |
 | `相似度.md` | 跨人同题雷同对（Winnowing 指纹，阈值 50%） |
 | `排名.md` | 嫌疑排名（最高跨人相似度 → 雷同对数 → 提交数） |
 | `code/` | 单个源码文件 `{姓名}_{题号}_{语言}.{ext}` |
+| `~/.dsh/nowcoder/nowcoder.db` | SQLite 持久化库 |
+
+## 数据库（SQLite）
+
+默认 `~/.dsh/nowcoder/nowcoder.db`（`--db` 可改）。两张表：
+
+```sql
+contests(contest_id, name, start_time, end_time, description)
+submissions(submission_id, contest_id, student, student_id, problem_index, problem_id,
+            language, verdict, score, submit_time, run_time, memory, length,
+            loc, comments, comment_ratio, phase, code, url, extracted_at)
+```
+
+`phase` ∈ `contest`（比赛期间）/ `after`（补题）/ `before`。`--query` 可执行任意只读 SQL，例如按人查提交、按题查 AC 数、导出数据。
 
 ## 登录 Cookie
 
@@ -85,10 +108,13 @@ python3 scripts/nowcoder_extract.py --contest 143786 --name "ACM-第一次训练
 | 用途 | 地址 | 返回 |
 | --- | --- | --- |
 | 最近参加的比赛 | `/acm-heavy/acm/contest/profile/contest-joined-history?uid={uid}&page=1&pageSize=30&onlyJoinedFilter=true&contestEndFilter=true` | JSON `data.dataList[]` |
+| 比赛信息 | `/acm/contest/contest-info?id={contestId}` | JSON `data.name/startTime/endTime/description` |
 | 提交列表 | `/acm/contest/status-list?token=&id={contestId}&page={n}&pageSize=50` | JSON `data.data[]`，`data.basicInfo.pageCount/statusCount` 翻页 |
 | 代码页 | `/acm/contest/view-submission?submissionId={id}` | 服务端渲染 HTML，代码在 `<pre class="prettyprint lang-xxx">` |
 
 提交对象字段：`userName`、`userId`、`submissionId`、`index`（题号 A/B/C）、`problemId`、`languageName`、`statusMessage`、`score`、`submitTime`、`fullScore`、`time`、`memory`、`length`。
+
+注意：`status-list` 含「比赛期间 + 赛后补题」两类提交，需按比赛窗口（`contest-info` 的 `startTime`/`endTime`）过滤。
 
 ## 审查说明
 
