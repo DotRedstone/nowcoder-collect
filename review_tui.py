@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,7 +13,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Select, Static, TabbedContent, TabPane, TextArea
+from textual.widgets import DataTable, Input, Static, TabbedContent, TabPane, TextArea
 
 from tui_backend import COOKIE_PATH, UID_PATH, DB_PATH, REVIEW_PATH, ReviewStore, case_key, local_contests, merge_contests, pair_sources, read_secret, write_secret
 import login
@@ -25,40 +26,96 @@ class ReviewApp(App):
     TITLE = "NOWCODER · Review Workspace"
     SUB_TITLE = "比赛代码审查"
     CSS = """
-    Screen { layout: vertical; }
-    #toolbar { height: 3; background: $panel; padding: 0 1; }
-    #toolbar Button { margin-right: 1; min-width: 11; }
-    #contest-input { width: 16; }
-    #workspace { height: 1fr; }
-    .pane { border: round $primary-background-lighten-2; padding: 0 1; min-width: 19; }
-    .pane Label { height: 2; text-style: bold; padding-top: 1; }
-    #left { width: 26%; }
-    #middle { width: 39%; }
-    #right { width: 35%; }
-    DataTable { height: 1fr; }
-    #search, #level { margin-bottom: 1; }
-    #evidence { height: 12; padding: 1; overflow-y: auto; }
-    #codes { height: 1fr; }
-    TextArea { height: 1fr; }
+    /* Quiet terminal canvas: no dashboard cards, no chunky buttons. */
+    Screen { layout: vertical; background: $background; color: $foreground; }
+    #titlebar {
+        height: 1; padding: 0 1; background: $surface;
+        color: $primary; text-style: bold;
+    }
+    #keybar {
+        height: 1; padding: 0 1; background: $background;
+        color: $text-muted;
+    }
+    #status {
+        height: 1; padding: 0 1; background: $surface;
+        color: $foreground;
+    }
+    #command-row, #id-row {
+        display: none; height: 1; background: $surface;
+    }
+    #command, #contest-input { height: 1; border: none; background: $surface; padding: 0 1; }
+    #workspace { height: 1fr; background: $background; }
+    .pane {
+        height: 1fr; min-width: 18;
+        padding: 0 1; border-right: solid $primary 22%;
+        background: $background;
+    }
+    .pane:focus-within { border-left: solid $primary; }
+    #left { width: 25%; }
+    #middle { width: 38%; }
+    #right { width: 37%; border-right: none; }
+    .pane-heading {
+        height: 1; color: $primary; text-style: bold;
+        background: $background;
+    }
+    #filterline { height: 1; color: $text-muted; }
+    DataTable {
+        height: 1fr; background: $background; color: $foreground;
+        scrollbar-size: 1 1;
+    }
+    DataTable > .datatable--cursor {
+        background: $primary 28%; color: $foreground; text-style: bold;
+    }
+    DataTable > .datatable--hover { background: $primary 12%; }
+    #search {
+        display: none; height: 1; border: none;
+        background: $surface; color: $foreground; padding: 0 1;
+    }
+    #evidence {
+        height: 11; padding: 1 0 0 1;
+        overflow-y: auto; color: $foreground;
+    }
+    #codes { height: 1fr; background: $background; }
+    TabbedContent { background: $background; }
+    Tabs { height: 2; background: $background; }
+    Tab { background: $background; color: $text-muted; padding: 0 1; }
+    Tab.-active { background: $background; color: $primary; text-style: bold; }
+    TextArea {
+        height: 1fr; background: $background; color: $foreground;
+        border: none; scrollbar-size: 1 1;
+    }
     #code-a, #code-b { width: 1fr; }
-    #status { height: 3; padding: 0 2; background: $panel; content-align-vertical: middle; }
-    #login-panel { display: none; height: 1fr; padding: 1 3; }
+    #login-panel { display: none; height: 1fr; padding: 1 2; background: $background; }
+    #login-heading { height: 1; color: $primary; text-style: bold; }
     #qr { height: 1fr; overflow-y: auto; }
-    #login-message { height: 3; }
-    #review-buttons { height: 3; }
-    #review-buttons Button { margin-right: 1; }
+    #login-message { height: 2; color: $text-muted; }
+    #uid-input { height: 3; margin: 1 0; }
     """
     BINDINGS = [
-        Binding("q", "quit", "退出"),
-        Binding("question_mark", "help", "帮助"),
-        Binding("slash", "search", "搜索"),
-        Binding("r", "refresh", "刷新"),
-        Binding("a", "analyze", "分析"),
-        Binding("c", "collect", "采集"),
-        Binding("escape", "back", "返回"),
-        Binding("ctrl+t", "toggle_login", "登录"),
-        Binding("ctrl+x", "cancel_task", "取消任务"),
+        Binding("q", "quit", "quit", show=False),
+        Binding("question_mark", "help", "help", show=False),
+        Binding("colon", "command", "command", show=False),
+        Binding("slash", "search", "search", show=False),
+        Binding("1", "pane_1", "contests", show=False),
+        Binding("2", "pane_2", "findings", show=False),
+        Binding("3", "pane_3", "inspector", show=False),
+        Binding("f", "filter", "filter", show=False),
+        Binding("r", "refresh", "refresh", show=False),
+        Binding("a", "analyze", "analyze", show=False),
+        Binding("c", "collect", "collect", show=False),
+        Binding("g", "rank", "ranking", show=False),
+        Binding("i", "open_id", "contest id", show=False),
+        Binding("l", "toggle_login", "login", show=False),
+        Binding("s", "scan", "scan", show=False),
+        Binding("x", "mark_reviewed", "reviewed", show=False),
+        Binding("d", "mark_dismissed", "dismissed", show=False),
+        Binding("exclamation_mark", "mark_investigate", "investigate", show=False),
+        Binding("t", "theme", "theme", show=False),
+        Binding("escape", "back", "back", show=False),
+        Binding("ctrl+x", "cancel_task", "cancel", show=False),
     ]
+    THEMES = ("ansi-dark", "catppuccin-mocha", "nord", "gruvbox", "textual-dark")
+    FILTERS = (("all", "ALL"), ("high", "HIGH"), ("pending", "PENDING"), ("reviewed", "REVIEWED"))
 
     def __init__(self):
         super().__init__()
@@ -76,57 +133,49 @@ class ReviewApp(App):
         self.login_active = False
         self.login_gen = 0
         self.login_visible = False
+        self.filter_idx = 0
+        self.active_pane = 0
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        with Horizontal(id="toolbar"):
-            yield Button("↻ 刷新", id="refresh")
-            yield Button("↓ 采集", id="collect", variant="primary")
-            yield Button("▶ 本地分析", id="analyze")
-            yield Button("▤ 榜单", id="rank")
-            yield Button("账户 / 扫码", id="login")
-            yield Input(placeholder="比赛 ID", id="contest-input")
-            yield Button("打开 ID", id="open-contest")
+        yield Static("  ◈ nowcoder / review  ·  1 contests  2 findings  3 inspect", id="titlebar")
+        with Horizontal(id="command-row"):
+            yield Input(placeholder=": command  (help / collect / analyze / contest 123 / theme nord)", id="command")
+        with Horizontal(id="id-row"):
+            yield Input(placeholder="contest id ↵", id="contest-input")
         with Horizontal(id="workspace"):
             with Vertical(classes="pane", id="left"):
-                yield Label("比赛 / Contests")
-                yield DataTable(id="contests", cursor_type="row")
+                yield Static(" 01  CONTESTS", classes="pane-heading")
+                yield DataTable(id="contests", cursor_type="row", show_header=False, cell_padding=1)
             with Vertical(classes="pane", id="middle"):
-                yield Label("线索 / Findings")
-                yield Input(placeholder="搜索选手、题号、判定  /", id="search")
-                yield Select([("全部线索", "all"), ("高优先级", "high"), ("待复核", "pending"), ("已处理", "reviewed")], value="all", allow_blank=False, id="level")
-                yield DataTable(id="findings", cursor_type="row")
+                yield Static(" 02  FINDINGS", classes="pane-heading")
+                yield Static(" ALL  ·  press f to filter", id="filterline")
+                yield Input(placeholder="/ search names / problem / verdict", id="search")
+                yield DataTable(id="findings", cursor_type="row", show_header=False, cell_padding=1)
             with Vertical(classes="pane", id="right"):
-                yield Label("证据 / Evidence")
-                yield Static("选择比赛并分析本地数据，或先采集。", id="evidence")
+                yield Static(" 03  INSPECTOR  /  code & diff", classes="pane-heading")
+                yield Static("Select a contest · press a to analyze or c to collect.", id="evidence")
                 with TabbedContent(id="codes"):
-                    with TabPane("并排源码"):
+                    with TabPane("A ↔ B"):
                         with Horizontal():
                             yield TextArea("", id="code-a", read_only=True, show_line_numbers=True)
                             yield TextArea("", id="code-b", read_only=True, show_line_numbers=True)
-                    with TabPane("统一 Diff"):
+                    with TabPane("unified diff"):
                         yield TextArea("", id="diff", read_only=True, show_line_numbers=True)
-                with Horizontal(id="review-buttons"):
-                    yield Button("已核查", id="review")
-                    yield Button("无需跟进", id="dismiss")
-                    yield Button("需进一步核实", id="investigate")
         with Vertical(id="login-panel"):
-            yield Label("微信扫码登录 / Login")
-            yield Static("点击开始扫码，或使用已有的 Cookie。", id="qr")
+            yield Static(" LOGIN  /  WECHAT QR   ·   s scan   ·   Enter save UID   ·   Esc back", id="login-heading")
+            yield Static("Press s to start scanning, or use a saved Cookie.", id="qr")
             yield Static("", id="login-message")
-            yield Input(placeholder="牛客 UID（用户主页地址中的数字）", id="uid-input")
-            yield Button("保存 UID", id="save-uid")
-            with Horizontal():
-                yield Button("开始扫码", id="start-login", variant="primary")
-                yield Button("关闭", id="close-login")
-                yield Button("手动配置提示", id="cookie-help")
-        yield Static("准备就绪 · ? 帮助 · Tab 切换焦点", id="status")
-        yield Footer()
+            yield Input(placeholder="Nowcoder UID (from your profile URL) · Enter to save", id="uid-input")
+        yield Static(" NORMAL  ·  ready", id="status")
+        yield Static(" 1/2/3 panes   j/k move   / search   f filter   : commands   a analyze   c collect   x review   ? help", id="keybar")
 
     def on_mount(self):
+        self.theme = os.environ.get("NOWCODER_THEME") or os.environ.get("TEXTUAL_THEME") or "ansi-dark"
         self.query_one("#contests", DataTable).add_columns("比赛", "提交", "代码")
         self.query_one("#findings", DataTable).add_columns("级别", "题", "选手对", "L3", "状态")
         self.load_contests()
+        self.apply_layout()
+        self.query_one("#contests", DataTable).focus()
         if read_secret(COOKIE_PATH):
             self.action_refresh()
         else:
