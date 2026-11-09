@@ -7,6 +7,8 @@
 - 保证：**同输入必同输出**（无随机、无时间戳、浮点定精度、结果稳定排序）
 - 依赖：**纯标准库**（difflib / hashlib / sqlite3 / tomllib / json），零第三方
 
+> 📄 完整内核设计（算法、公式、阈值、确定性保证、参考文献）见 [`docs/design.md`](docs/design.md)
+
 ## 架构
 
 ```
