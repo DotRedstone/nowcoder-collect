@@ -259,6 +259,8 @@ class ReviewApp(App):
         self.running = False
         self.cancel_requested = False
         self.spinner_tick = 0
+        self.wallpaper_source = ""
+        self.wallpaper_signature = None
         self.show_all_contests = False
         self.finding_filter = 0
         self.finding_group = 0
@@ -319,20 +321,56 @@ class ReviewApp(App):
         self.apply_theme(self.settings["theme"])
         self.push_screen(Page("home"))
         self.set_interval(1.0, self.update_statusline)
+        self.set_interval(4.0, self.poll_wallpaper)
         if self.error_at_start:
             self.set_status(self.error_at_start)
 
     def apply_theme(self, choice: str) -> None:
         if choice in ("auto", "wallpaper"):
-            theme, _ = load_wallpaper_theme()
+            theme, path = load_wallpaper_theme()
             if theme:
                 self.register_theme(theme)
+                self.wallpaper_source = path
+                self.wallpaper_signature = self._wallpaper_stat(path)
                 choice = "wallpaper"
             else:
+                self.wallpaper_source = ""
+                self.wallpaper_signature = None
                 choice = "ansi-dark"
+        else:
+            self.wallpaper_source = ""
+            self.wallpaper_signature = None
         if choice not in self.available_themes:
             choice = "ansi-dark"
         self.theme = choice
+
+    @staticmethod
+    def _wallpaper_stat(path: str) -> tuple[int, int] | None:
+        try:
+            stat = Path(path).stat()
+            return stat.st_mtime_ns, stat.st_size
+        except OSError:
+            return None
+
+    def poll_wallpaper(self) -> None:
+        if self.settings.get("theme") not in ("auto", "wallpaper"):
+            return
+        fresh, source = load_wallpaper_theme()
+        if not fresh:
+            return
+        signature = self._wallpaper_stat(source)
+        if source == self.wallpaper_source and signature == self.wallpaper_signature:
+            return
+        self.register_theme(fresh)
+        self.wallpaper_source = source
+        self.wallpaper_signature = signature
+        if self.theme == "wallpaper":
+            self.theme = "ansi-dark"
+        self.theme = "wallpaper"
+        self.set_status("壁纸主题已同步")
+        page = self.current_page()
+        if page:
+            self.render_page(page)
 
     def current_page(self) -> Page | None:
         screen = self.screen
