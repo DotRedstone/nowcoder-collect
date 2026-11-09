@@ -101,6 +101,8 @@ class ScreenTests(unittest.TestCase):
                         app.action_back()
                         await pilot.pause()
                         self.assertEqual(app.screen.kind, "confirm")
+                        app.screen.query_one("#list").move_cursor(row=1)
+                        await pilot.pause()
                         app.action_enter()
                         await pilot.pause()
                         self.assertEqual(app.screen.kind, "settings")
