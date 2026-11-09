@@ -715,14 +715,14 @@ class ReviewApp(App):
         page.context["submission"] = sub
         cid = page.context["cid"]
         page.query_one("#frame").border_title = f"{sub.get('student', '')} · {sub.get('problem_index', '?')} · #{sub['submission_id']}"
-        page.query_one("#frame").border_subtitle = f"{index+1}/{len(seq)} · n/p · [/] 历史"
+        page.query_one("#frame").border_subtitle = f"{index+1}/{len(seq)} · n/p · 历史版本"
         ms = sub.get("submit_time")
         dt = datetime.fromtimestamp(ms/1000).strftime("%Y-%m-%d %H:%M:%S") if ms else "未知"
         page.query_one("#overview", Static).update(
             f"UID {sub.get('student_id')} · {sub.get('verdict', '未知')} · {sub.get('language', '')}"
             f" · 得分 {sub.get('score', 0)} · {dt}\n"
             f"标记：{self.people.get(cid, int(sub.get('student_id') or 0)).get('mark', 'unreviewed')}"
-            "   n/p 前后代码 · [/] 同题历史 · m 给人标记")
+            "   n/p 前后代码 · 方括号切换历史 · m 给人标记")
         page.show_code(sub.get("code") or "（本次提交无本地源码）")
         self.update_statusline()
 
