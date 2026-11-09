@@ -11,6 +11,7 @@
 import curses
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -59,8 +60,8 @@ def list_contests(cookie: str, uid: str):
 
 
 def run_extract(contest_id, status: dict):
-    """后台线程：跑提取，实时更新 status['text'] 与 status['summary']。"""
-    status["text"] = "正在拉取提交列表…"
+    """后台线程：跑提取，实时更新 status（text/step/cur/total/summary）。"""
+    status.update({"text": "正在启动…", "step": 1, "total_steps": 5, "cur": 0, "total": 0})
     proc = subprocess.Popen(
         [sys.executable, os.path.join(REPO, "skill", "scripts", "nowcoder_extract.py"),
          "--contest", str(contest_id), "--threads", str(THREADS),
@@ -69,8 +70,17 @@ def run_extract(contest_id, status: dict):
     )
     for line in proc.stderr:
         line = line.strip()
-        if line:
-            status["text"] = line
+        if not line:
+            continue
+        status["text"] = line
+        m = re.search(r"\[(\d+)/(\d+)\]", line)
+        if m:
+            status["step"] = int(m.group(1))
+            status["total_steps"] = int(m.group(2))
+        m = re.search(r"(\d+)/(\d+)", line)
+        if m:
+            status["cur"] = int(m.group(1))
+            status["total"] = int(m.group(2))
     out = proc.stdout.read()
     proc.wait()
     try:
@@ -153,9 +163,32 @@ class Tui:
         self.scr.addstr(0, len(text) + 2, " " * max(0, self.w() - len(text) - 2), curses.color_pair(6))
 
     def footer(self, keys):
-        s = "  ".join(keys)
+        s = "  " + "   ".join(keys)
         if self.h() > 0:
-            self.scr.addstr(self.h() - 1, 0, s[: self.w() - 1], curses.A_DIM)
+            self.scr.addstr(self.h() - 1, 0, s[: self.w() - 1], curses.color_pair(6))
+            self.scr.addstr(self.h() - 1, len(s), " " * max(0, self.w() - len(s) - 1), curses.color_pair(6))
+
+    def box(self, y, x, h, w):
+        """画一个圆角边框。"""
+        if w < 4 or h < 3:
+            return
+        self.scr.addstr(y, x, "╭" + "─" * (w - 2) + "╮")
+        for i in range(1, h - 1):
+            if y + i >= self.h():
+                break
+            self.scr.addstr(y + i, x, "│")
+            self.scr.addstr(y + i, x + w - 1, "│")
+        if y + h - 1 < self.h():
+            self.scr.addstr(y + h - 1, x, "╰" + "─" * (w - 2) + "╯")
+
+    def progress_bar(self, y, x, w, frac, label=""):
+        """画进度条：[████░░░░] 50%"""
+        frac = max(0.0, min(1.0, frac))
+        pct = f"{int(frac * 100):3d}%"
+        bar_w = max(6, w - len(label) - len(pct) - 6)
+        filled = int(bar_w * frac)
+        bar = "█" * filled + "░" * (bar_w - filled)
+        self.scr.addstr(y, x, f"{label} [{bar}] {pct}"[: w])
 
     def input_text(self, prompt):
         self.scr.clear()
@@ -181,21 +214,33 @@ class Tui:
     # ---- 各屏幕 ----
     def draw_menu(self):
         self.scr.clear()
-        self.title("牛客代码收集 · 雷同检测面板")
+        self.title(" 牛客代码收集 · 雷同检测 ")
         login = "✓ 已登录" if self.cookie else "✗ 未登录"
         self.scr.addstr(2, 2, f"登录状态: {login}", curses.color_pair(5 if self.cookie else 2) | curses.A_BOLD)
-        self.scr.addstr(3, 2, f"Cookie 文件: {COOKIE_FILE}")
-        self.scr.addstr(4, 2, f"数据库:     {DB_FILE}")
-        self.scr.addstr(6, 2, "── 操作 ──", curses.A_BOLD)
-        items = ["选择比赛并分析（登录→爬取→检测）", "分析已爬取的比赛（直接用数据库）",
-                 "查看榜单", "扫码登录（微信）", "手动粘贴 Cookie", "退出"]
-        for i, s in enumerate(items):
-            y = 8 + i
+        self.scr.addstr(3, 2, f"数据库:    {DB_FILE}", curses.A_DIM)
+
+        items = [
+            ("选择比赛并分析", "登录 → 爬取 → 检测"),
+            ("分析已爬取的比赛", "直接用数据库"),
+            ("查看榜单", "重建 IOI 总分排名"),
+            ("扫码登录（微信）", "终端二维码登录"),
+            ("手动粘贴 Cookie", "从浏览器复制"),
+            ("退出", ""),
+        ]
+        by, bx = 5, 2
+        bh = len(items) + 3
+        bw = min(self.w() - 4, 62)
+        self.box(by, bx, bh, bw)
+        for i, (name, desc) in enumerate(items):
+            y = by + 2 + i
             attr = curses.A_REVERSE if i == self.menu_idx else curses.A_NORMAL
-            self.scr.addstr(y, 2, f"  {s}", attr)
+            line = f"  {i + 1}. {name}"
+            if desc:
+                line = line.ljust(bw - 4 - len(desc)) + desc
+            self.scr.addstr(y, bx + 1, line[: bw - 2], attr)
         if self.msg:
             self.scr.addstr(self.h() - 2, 2, self.msg, curses.color_pair(2))
-        self.footer(["↑↓ 选择", "Enter 确认", "q 退出"])
+        self.footer(["↑↓/数字 选择", "Enter 确认", "q 退出"])
 
     def draw_pick(self):
         self.scr.clear()
@@ -216,33 +261,60 @@ class Tui:
 
     def draw_running(self):
         self.scr.clear()
-        self.title(f"处理中 · 比赛 {self.contest_id} {self.contest_name}")
-        self.scr.addstr(4, 2, "进度：", curses.A_BOLD)
+        self.title(f" 正在处理 · {self.contest_name} (#{self.contest_id}) ")
+        steps = ["拉取比赛信息", "拉取提交列表", "抓取代码（多线程）", "写库 + 导出报告", "完成"]
+        step = self.status.get("step", 1)
+        cur = self.status.get("cur", 0)
+        total = self.status.get("total", 0)
         txt = self.status.get("text", "")
-        self.scr.addstr(6, 2, "  " + txt[: self.w() - 4])
-        self.scr.addstr(8, 2, "（请稍候，爬取约 1 分钟内完成）", curses.A_DIM)
+        w = self.w()
+
+        for i, s in enumerate(steps, 1):
+            y = 2 + i
+            if i < step:
+                self.scr.addstr(y, 3, f"  ✓  {s}", curses.color_pair(5))
+            elif i == step:
+                self.scr.addstr(y, 3, f"  ▶  {s}", curses.color_pair(3) | curses.A_BOLD)
+            else:
+                self.scr.addstr(y, 3, f"  ○  {s}", curses.color_pair(4))
+
+        py = 2 + len(steps) + 1
+        if total > 0 and step == 3:
+            self.progress_bar(py, 3, w - 6, cur / total, f"  抓取进度")
+        else:
+            self.scr.addstr(py, 3, f"  {txt[: w - 6]}", curses.color_pair(3))
+        self.footer(["请稍候… 多线程爬取约 1 分钟"])
 
     def draw_results(self):
         self.scr.clear()
-        self.title(f"雷同检测结果 · {self.contest_name} (#{self.contest_id})")
+        self.title(f" 雷同检测结果 · {self.contest_name} (#{self.contest_id}) ")
         m = (self.report or {}).get("meta", {})
         vs = m.get("verdict_summary", {})
-        self.scr.addstr(2, 2, f"比较 {m.get('pairs_compared', 0)} 对，报告 {m.get('pairs_reported', 0)} 条", curses.A_BOLD)
-        summary = "  ".join(f"{k}:{v}" for k, v in vs.items())
-        self.scr.addstr(3, 2, summary)
-        self.scr.addstr(4, 2, "─" * min(self.w() - 4, 80))
-        start = self.res_scroll
+        parts = []
+        for name, col in (("实锤", 1), ("中偏强", 2), ("存疑", 3), ("排除", 4)):
+            parts.append((name, vs.get(name, 0), col))
+        self.scr.addstr(2, 2, f"比较 {m.get('pairs_compared', 0)} 对 → ", curses.A_BOLD)
+        x = len(f"比较 {m.get('pairs_compared', 0)} 对 → ") + 2
+        for name, n, col in parts:
+            s = f" {name} {n} "
+            self.scr.addstr(2, x, s, curses.color_pair(col) | curses.A_BOLD)
+            x += len(s)
+        self.scr.addstr(3, 2, "─" * (self.w() - 4))
+
         h = self.h()
-        for i in range(start, min(len(self.results), start + h - 8)):
+        start = self.res_scroll
+        if not self.results:
+            self.scr.addstr(4, 2, "  （未发现跨人同题雷同，队伍很干净 ✓）", curses.color_pair(5))
+        for i in range(start, min(len(self.results), start + h - 6)):
             r = self.results[i]
-            y = 5 + i - start
+            y = 4 + i - start
             attr = curses.A_REVERSE if i == self.res_idx else curses.A_NORMAL
             color = curses.color_pair(VERDICT_COLOR.get(r["verdict"], 4))
-            sc = r["scores"]; ra = r["rare"]; tv = r["timeline"]
-            line = (f"{r['verdict']:3s}  {r['pair'][0]}/{r['problem']} ↔ {r['pair'][1]}  "
-                    f"L2={sc['L2']:.2f} L3={sc['L3']:.2f} rare={ra['score']:.2f} "
-                    f"Δ={tv.get('delta_seconds') or '—'}s")
-            self.scr.addstr(y, 2, "  " + line[: self.w() - 4], attr | color)
+            sc, ra, tv = r["scores"], r["rare"], r["timeline"]
+            left = f"{r['verdict']}  {r['pair'][0]}/{r['problem']} ↔ {r['pair'][1]}"
+            right = f"L2={sc['L2']:.2f} L3={sc['L3']:.2f} rare={ra['score']:.2f} Δ={tv.get('delta_seconds') or '—'}s"
+            line = ("  " + left.ljust(40) + right)[: self.w() - 2]
+            self.scr.addstr(y, 2, line, attr | color)
         self.footer(["↑↓ 滚动", "Enter 详情", "r 榜单", "q 返回"])
 
     def draw_detail(self):
@@ -297,6 +369,9 @@ class Tui:
                 self.menu_idx = (self.menu_idx - 1) % 6
             elif key in (curses.KEY_DOWN, ord("j")):
                 self.menu_idx = (self.menu_idx + 1) % 6
+            elif ord("1") <= key <= ord("6"):
+                self.menu_idx = key - ord("1")
+                self.menu_action()
             elif key in (curses.KEY_ENTER, 10, 13):
                 self.menu_action()
             elif key in (ord("q"), 27):
