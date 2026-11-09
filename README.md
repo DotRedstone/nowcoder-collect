@@ -1,88 +1,123 @@
-# nowcoder-collect · 牛客比赛代码审查工作台
+# nowcoder-collect · 牛客训练赛审查工作台
 
-采集牛客 ACM 比赛提交、执行确定性雷同检测，**辅助人工复核**。相似代码、时间关系或算法分级并不意味着作弊已被证明。
+**用途：** 辅助训练赛管理员采集本校内部比赛的代码、分析相似线索、阅读**全部选手的全部提交历史**、进行人工复核，并导出最终成绩榜。算法结论只是一条线索，不自动给任何人判定作弊。
 
-## 启动
+## 启动（Python 3.11+）
 
-需要 Python 3.11+。采集器、检测器和旧版 curses TUI 仍然只依赖标准库；新版终端界面使用 [Textual](https://textual.textualize.io/)。
+采集器、检测器和旧版 curses 继续仅用 Python 标准库；新版界面采用 Textual。
 
-```bash
-python3 -m pip install -r requirements-tui.txt
-./run.sh
-```
+\`\`\`fish
+git fetch origin
+git switch feat/hierarchical-review-workflow
 
-在 NixOS 等不允许全局 pip 安装的环境，可使用虚拟环境：
-
-```bash
 python3 -m venv .venv
-. .venv/bin/activate
+source .venv/bin/activate.fish
 python -m pip install -r requirements-tui.txt
 ./run.sh
-```
+\`\`\`
 
-无 Textual 时仍可运行 `./run.sh --legacy` 进入原 curses 界面；检测 CLI 和 DSH skill 完全保留。
+如果分支已存在，用 \`git pull --ff-only origin feat/hierarchical-review-workflow\` 更新。Bash 的激活脚本是 \`.venv/bin/activate\`，Fish 要使用 \`.venv/bin/activate.fish\`。NixOS 建议通过 Nix 提供 Python 的虚拟环境，避免在系统 Python 中全局安装。
 
-## 新工作区
+旧版依然可使用 \`./run.sh --legacy\`，不会覆盖原本的 \`tui.py\`。
 
-- **左栏比赛**：同时显示 SQLite 本地比赛与在线最近参加的比赛。无需联网即可读取已采集比赛。顶部可直接输入比赛 ID 打开未参加的比赛。
-- **中栏线索**：按参赛者、题号、检测等级搜索，按高优先级和人工复核状态筛选。
-- **右栏证据**：同时查看三种相似度、稀有指纹、提交时间线，以及用于检测的两份代表代码、统一差异视图。
-- **人工复核**：提供“已核查 / 无需跟进 / 需进一步核实”状态，独立保存在 `~/.dsh/nowcoder/reviews.json`，不会写回原比赛数据或改变检测算法结论。
-- **后台任务**：采集和检测作为子进程执行，UI 持续响应；Ctrl+X 可请求取消当前采集/检测，任务失败会在状态栏说明。
+## 完整审核流程
 
-快速键：`1/2/3` 切比赛、线索、审查窗格；`j/k` 或方向键移动；`/` 搜索、`f` 循环过滤、`:` 打开命令模式；`a` 离线分析、`c` 采集并分析、`r` 在线刷新；`i` 输入比赛 ID、`l` 登录、`s` 扫码；`x` 标记已核查、`d` 无需跟进、`!` 需进一步核实；`t` 切换主题、`Ctrl+X` 取消后台任务、`?` 帮助、`q` 退出。
+\`\`\`text
+首页
+ ├── 比赛列表 ──▶ 比赛总览
+ │                ├── 线索 ──▶ 证据 / 两份代码 / Diff ──▶ 人员标记
+ │                ├── 选手 ──▶ 选手详情 ──▶ 任意提交代码 ──▶ 历史版本
+ │                ├── 题目 ──▶ 题目详情 ──▶ 不同选手代表代码 / 历史版本
+ │                └── 最终排行榜 ──▶ 剔除 / 标记策略 ──▶ Markdown / CSV / HTML
+ ├── 打开比赛 ID
+ ├── 跨比赛待复核
+ ├── 登录 / 账户
+ └── 设置
+\`\`\`
 
-界面采用紧凑的 Linux rice 风格：圆角窗格标题和副标题显示筛选结果数；焦点边框与强调色绑定；风险等级按红 / 黄 / 灰提示，复核状态单独着色。底部是单行 lualine 风格状态栏，包含 NORMAL/COMMAND/COLLECT 模式、当前比赛和窗格、主题、时间与采集进度。`?` 弹出完整按键说明，不常驻第二条快捷键栏。
+每层只有一个主焦点；顶部面包屑标示当前位置，Enter 进入、Esc/h 返回，不再常驻三栏。底部保留单行模式、当前对象、主题、时间和任务进度，\`?\` 打开上下文按键帮助。
 
-### 主题、Nerd Font 与壁纸联动
+**筛选比赛不等于判断管理者创建的比赛。**在线列表只读取该账户“已加入的比赛”，再与本地比赛合并，并用正则白/黑名单筛出需要审查的本校比赛。白名单空表示显示全部；黑名单优先。\`F\` 可以临时显示不命中的比赛，手动输入 ID 的比赛始终可打开。
 
-默认 `auto`：优先读取 `~/.cache/wal/colors.json`（pywal），其次尝试 `~/.cache/matugen/colors.json`、`~/.config/matugen/colors.json`；都没有就回退到 `ansi-dark`。**matugen 没有固定的 JSON 输出位置**，所以如果你通过 matugen 模板生成 JSON，最可靠的是设置 `NOWCODER_THEME_FILE` 指向该文件。仅解析 JSON 色值，不运行外部脚本或 shell。
+**管理者隔离是检测输入级别的。**设置中按 UID 配置隐藏人员；分析时复制 SQLite 到短期临时文件并过滤这些人的提交，再调用原检测器。原数据库与原算法完全不动，检测缓存按名单/阈值组合区分；修改名单后需要重新分析。这些人员在选手页灰显、默认榜单中剔除，但管理员仍可查阅他们的代码。
 
-运行时每 4 秒检查一次配色文件是否变更（`auto`/ `wallpaper` 模式），更新壁纸后通常无需重启。可用 `:theme auto` 重新读取，或用 `:theme gruvbox` 固定主题（固定主题不会跟随壁纸）。`t` 在内置和已注册的壁纸主题间切换。
+**所有源码来自本地 SQLite。**选手页按人查看所有 WA/CE/AC 的提交，按题可翻各人的代表代码。代码页 \`n/p\` 走进入代码页时的名单，\`[\` / \`]\` 只走当前人当前题的历史版本，无需再访问牛客网页。
 
-在 **Fish Shell** 中使用：
+**人和线索是两种不同的审核记录。**线索可以标记“已核查 / 无需跟进 / 需进一步核实”，人员独立标为“正常 / 存疑 / 作弊者 / 未看”，并可附审核备注。任何自动相似度都不会自动将选手标为作弊者。
 
-```fish
-# 有 pywal 或 matugen JSON 时自动跟随
+## 排行榜计算说明
+
+采集器现在会额外保存一份**官方 submit-list 源数据的本地汇总快照**（含报名而零提交者和各题满分）。因此，采集成功的比赛可依据与现有 \`compute_rank\` 一致的 IOI 计分口径离线恢复排行榜：每题取最高分，按总分、AC、昵称排序；快照里带 UID，可以应用人工标记。
+
+旧数据库如果没有这份快照，榜单退回 SQLite 提交记录推算：不包含零提交报名者，也无法可靠恢复题目原始满分；页面会明确标成“本地推算”，不能当成完整官方榜。
+
+排行榜可分别对作弊者设置“剔除 / 标记”、存疑者设置“照常 / 标记 / 剔除”、管理者设置“剔除 / 标记”，\`e\` 导出当前策略下结果到 \`~/nowcoder-data/<比赛ID>/ranking.md|csv|html\`（或者设置的输出目录）。剔除的人不参与名次顺延；标记的人显示但不占名次。还有未处理线索/未核查人员时提示警告，不强制阻止导出。
+
+## 快捷键
+
+| 键 | 功能 |
+|---|---|
+| Enter / l | 进入当前选择 |
+| Esc / h | 返回上一层 |
+| j / k、↑ / ↓ | 移动 |
+| g / G | 顶部 / 底部 |
+| / | 当前层搜索 |
+| f | 循环线索/选手筛选；比赛列表用 F 显示全部 |
+| a / c | 分析本地比赛 / 采集并分析 |
+| r | 刷新在线比赛列表 |
+| m | 选择对象并给人手动标记，可附备注 |
+| x / d / ! | 已核查 / 无需跟进 / 需进一步核实（线索） |
+| 1 / 2 | 证据页进入 A / B 选手 |
+| n / p | 下一份 / 上一份代码或线索 |
+| [ / ] | 当前人同题历史代码版本 |
+| e | 导出榜单，或编辑设置条目 |
+| ← / → | 榜单策略、数值与枚举切换 |
+| Ctrl+S | 保存设置 |
+| Ctrl+X | 取消后台任务 |
+| : | 命令模式（支持 \`:contest 123\`、\`:theme auto\`、\`:collect\`、\`:analyze\`） |
+| ? | 当前层帮助 |
+| q | 退出；任务运行时先取消任务 |
+
+## 用户数据与配置
+
+用户私有配置统一存储在 \`~/.dsh/nowcoder/\`，文件默认权限为 \`0600\`：
+
+| 文件 | 内容 |
+|---|---|
+| \`cookie.txt\`、\`uid.txt\` | 登录态与当前用户 UID（不写入仓库） |
+| \`nowcoder.db\` | 比赛及全部已采集提交代码 |
+| \`settings.toml\` | 采集线程、路径、外观、榜单默认策略 |
+| \`filters.toml\` | 比赛白名单 / 黑名单正则和匹配选项 |
+| \`staff.toml\` | 管理人员 UID 与启用状态 |
+| \`detector.toml\` | 用户检测阈值覆盖，绝不改 \`detector/config.toml\` |
+| \`reviews.json\` | 线索审核状态 |
+| \`people.json\` | \`比赛ID:UID\` 形式的人员人工标记、备注、时间 |
+| \`reports/\` | 最近一次与当前管理名单/阈值相匹配的检测结果缓存 |
+| \`ranking-source/\` | 采集时保存的官方同源榜单汇总，不包含 Cookie |
+
+比赛筛选中的非法正则不会被保存；用户对设置的修改先作为草稿，\`Ctrl+S\` 保存，或在某分类内“恢复本类默认设置”。登录二维码只在终端显示，Cookie 值不在界面展示。
+
+## 主题
+
+保留 \`ansi-dark\`、Catppuccin、Nord、Gruvbox 等。支持自动读取 pywal 或 matugen JSON（\`rice_theme.py\`），可通过 \`NOWCODER_THEME_FILE\` 指向自定义生成路径。Nerd Font 可选：
+
+\`\`\`fish
 set -lx NOWCODER_THEME auto
 set -lx NOWCODER_THEME_FILE ~/.cache/wal/colors.json
-
-# Nerd Font 可用时启用 powerline glyph；缺字形就不设置
 set -lx NOWCODER_NERD_FONT 1
 ./run.sh
-```
+\`\`\`
 
-无 Nerd Font 默认使用 `▌` 作为分隔符，避免乱码。预置主题也可用 `NOWCODER_THEME=nord ./run.sh`。其他命令包括 `:contest 143786`、`:analyze`、`:collect`。
+若不存在该配色文件会回退到 ANSI 配色。原有检测算法、输出 schema 和旧 curses 界面均保留。
 
-窄屏为单窗格，使用 `1/2/3` 切换；中等宽度显示两个窗格，当前在审查窗格时显示“线索 + 审查”。
+## 测试
 
-首次登录：按 `l` 打开登录页，按 `s` 扫码并用微信确认；Cookie 存于 `~/.dsh/nowcoder/cookie.txt`。在线最近比赛列表还需要用户 UID，可在账户页面填写（从牛客个人主页地址获取），保存在 `~/.dsh/nowcoder/uid.txt`。请勿提交 Cookie、UID 或私人审查记录。
+\`\`\`fish
+python -m compileall -q review_tui.py review_domain.py review_settings.py tui_backend.py
+python -m unittest discover -s tests -v
+pushd detector
+python -m unittest discover -s tests -v
+popd
+\`\`\`
 
-数据库：`~/.dsh/nowcoder/nowcoder.db`；采集输出：`~/nowcoder-data/<比赛ID>/`。旧数据格式保持兼容。
-
-## 检测与测试
-
-```bash
-python3 detector/main.py --contest 143786 --json-out report.json
-(cd detector && python3 -m unittest discover -s tests -v)
-python3 -m unittest discover -s tests -v
-```
-
-确定性检测器使用 L1 原文、L2 去空白、L3 词法归一化、稀有 n-gram、模板排除和提交时间线。详细算法、阈值和限制见 [detector/docs/design.md](detector/docs/design.md)。
-
-## 目录
-
-```text
-review_tui.py         Textual 多面板审查工作区
-tui_backend.py        本地比赛索引、代码查询、复核记录
-tui.py                原版 curses TUI（--legacy）
-login.py              微信扫码登录
-skill/scripts/        牛客数据采集 CLI
-detector/             确定性雷同检测器
-browser-extension/    浏览器采集扩展（可选）
-tests/                TUI 数据层测试
-```
-
-数据隐私：工具只读取牛客页面，不提交修改；代码和审查记录中可能包含他人隐私，请勿上传公共仓库。模型不能仅凭代码相似度直接认定抄袭或 AI 代做。
-
-MIT License。
+目前这是基于 \`refactor/review-workspace\` 的 Draft PR，需要继续做无登录、真实本地 SQLite、真实扫码及长任务终端验收。**不要把检测等级或手动标记当成无需进一步程序即可处分学生的结论。**
