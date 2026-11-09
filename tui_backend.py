@@ -37,11 +37,11 @@ def local_contests(db: Path = DB_PATH) -> list[dict[str, Any]]:
         con.row_factory = sqlite3.Row
         try:
             rows = con.execute("""
-                SELECT c.contest_id, c.name, COUNT(s.submission_id) AS submissions,
+                SELECT c.contest_id, c.name, c.start_time, COUNT(s.submission_id) AS submissions,
                        SUM(CASE WHEN s.code IS NOT NULL AND s.code != '' THEN 1 ELSE 0 END) AS codes
                   FROM contests c
                   LEFT JOIN submissions s ON s.contest_id = c.contest_id
-                 GROUP BY c.contest_id, c.name
+                 GROUP BY c.contest_id, c.name, c.start_time
                  ORDER BY c.start_time DESC, c.contest_id DESC
             """).fetchall()
         except sqlite3.OperationalError as e:
@@ -58,8 +58,10 @@ def merge_contests(local: list[dict], remote: list[dict]) -> list[dict]:
         cid = int(c["contestId"])
         entry = merged.setdefault(cid, {
             "contest_id": cid, "name": "", "submissions": 0, "codes": 0,
+            "start_time": c.get("startTime"),
         })
         entry["name"] = entry["name"] or c.get("contestName") or f"比赛 #{cid}"
+        entry["start_time"] = entry.get("start_time") or c.get("startTime")
     return sorted(merged.values(), key=lambda c: c["contest_id"], reverse=True)
 
 
