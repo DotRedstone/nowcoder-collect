@@ -27,6 +27,37 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "skill/scripts"))
 import nowcoder_extract as extract  # noqa: E402
 
+class HelpScreen(ModalScreen[None]):
+    """On-demand keymap, keeping the normal screen a single status line."""
+
+    BINDINGS = [
+        Binding("escape", "close", "返回", show=False),
+        Binding("question_mark", "close", "返回", show=False),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Static(
+            "  nowcoder / keys\n\n"
+            "  1 / 2 / 3    比赛 / 线索 / 审查\n"
+            "  j / k        上下移动        Tab   下一个焦点\n"
+            "  /            搜索            f     循环过滤\n"
+            "  :            命令模式        i     输入比赛 ID\n"
+            "  a            本地检测        c     采集并检测\n"
+            "  r            更新比赛        g     获取榜单\n"
+            "  x            已核查          d     无需跟进\n"
+            "  !            需进一步核实    l     登录\n"
+            "  s            开始扫码        t     切换主题\n"
+            "  Ctrl+X       请求取消任务    q     退出\n\n"
+            "  :theme auto  重新读取壁纸配色\n"
+            "  :contest ID  打开比赛\n\n"
+            "  Esc / ?      关闭此面板",
+            id="help-card",
+        )
+
+    def action_close(self) -> None:
+        self.dismiss()
+
+
 class ReviewApp(App):
     TITLE = "NOWCODER · Review Workspace"
     SUB_TITLE = "比赛代码审查"
@@ -581,7 +612,8 @@ class ReviewApp(App):
     def action_pane_3(self): self.focus_pane(2)
 
     def action_help(self):
-        self.status("1/2/3 panes · j/k move · / search · f filter · : commands · a analyze · c collect · x/d review · l login · i ID · t theme · q quit")
+        self.status("快捷键帮助 · Esc 关闭")
+        self.push_screen(HelpScreen())
 
     def action_search(self):
         if not self.login_visible:
@@ -601,6 +633,7 @@ class ReviewApp(App):
         field = self.query_one("#command", Input)
         field.value = ""
         field.focus()
+        self.update_statusline()
 
     def action_open_id(self):
         if self.login_visible: return
@@ -608,6 +641,7 @@ class ReviewApp(App):
         field = self.query_one("#contest-input", Input)
         field.value = ""
         field.focus()
+        self.update_statusline()
 
     def on_input_submitted(self, event: Input.Submitted):
         name = event.input.id
@@ -625,6 +659,7 @@ class ReviewApp(App):
         elif name == "search":
             self.query_one("#search").display = False
             self.focus_pane(1)
+        self.update_statusline()
 
     def execute_command(self, command):
         pieces = command.split()
@@ -642,20 +677,21 @@ class ReviewApp(App):
             self.query_one("#contest-input", Input).value = pieces[1]
             self.open_contest_id()
         elif op == "theme" and len(pieces) == 2:
-            if pieces[1] in self.available_themes:
-                self.theme = pieces[1]
-                self.status(f"theme: {self.theme}")
+            if pieces[1] in ("auto", "wallpaper") or pieces[1] in self.available_themes:
+                self.apply_theme(pieces[1])
+                label = f"{self.theme} · {self._wallpaper_source}" if self._wallpaper_source else self.theme
+                self.status(f"theme: {label}")
             else:
-                self.status(f"Unknown theme: {pieces[1]}")
+                self.status(f"未知主题：{pieces[1]} · :theme auto 可重新读取壁纸配色")
         else:
             self.status(f"Unknown command: {command} · :help")
 
     def action_theme(self):
-        themes = [name for name in self.THEMES if name in self.available_themes]
+        themes = [name for name in ("wallpaper", *self.THEMES) if name in self.available_themes]
         if not themes: return
         try: index = (themes.index(self.theme) + 1) % len(themes)
         except ValueError: index = 0
-        self.theme = themes[index]
+        self.apply_theme(themes[index])
         self.status(f"theme: {self.theme}")
 
     def action_scan(self):
@@ -680,6 +716,7 @@ class ReviewApp(App):
             self.query_one("#uid-input", Input).focus()
         else:
             self.focus_pane(0)
+        self.update_statusline()
 
     def action_back(self):
         if self.query_one("#command-row").display:
