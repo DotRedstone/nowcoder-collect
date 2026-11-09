@@ -28,6 +28,7 @@ class ReviewApp(App):
     Screen { layout: vertical; }
     #toolbar { height: 3; background: $panel; padding: 0 1; }
     #toolbar Button { margin-right: 1; min-width: 11; }
+    #contest-input { width: 16; }
     #workspace { height: 1fr; }
     .pane { border: round $primary-background-lighten-2; padding: 0 1; min-width: 19; }
     .pane Label { height: 2; text-style: bold; padding-top: 1; }
@@ -83,6 +84,8 @@ class ReviewApp(App):
             yield Button("▶ 本地分析", id="analyze")
             yield Button("▤ 榜单", id="rank")
             yield Button("账户 / 扫码", id="login")
+            yield Input(placeholder="比赛 ID", id="contest-input")
+            yield Button("打开 ID", id="open-contest")
         with Horizontal(id="workspace"):
             with Vertical(classes="pane", id="left"):
                 yield Label("比赛 / Contests")
@@ -110,6 +113,8 @@ class ReviewApp(App):
             yield Label("微信扫码登录 / Login")
             yield Static("点击开始扫码，或使用已有的 Cookie。", id="qr")
             yield Static("", id="login-message")
+            yield Input(placeholder="牛客 UID（用户主页地址中的数字）", id="uid-input")
+            yield Button("保存 UID", id="save-uid")
             with Horizontal():
                 yield Button("开始扫码", id="start-login", variant="primary")
                 yield Button("关闭", id="close-login")
@@ -245,6 +250,7 @@ class ReviewApp(App):
             "rank": self.action_rank, "login": self.action_toggle_login,
             "start-login": self.start_login, "close-login": self.action_back,
             "cookie-help": self.cookie_help,
+            "open-contest": self.open_contest_id, "save-uid": self.save_uid,
             "review": lambda: self.mark("已核查"), "dismiss": lambda: self.mark("无需跟进"),
             "investigate": lambda: self.mark("需进一步核实"),
         }
@@ -265,6 +271,30 @@ class ReviewApp(App):
 
     def action_back(self):
         if self.login_visible: self.action_toggle_login()
+
+    def open_contest_id(self):
+        text = self.query_one("#contest-input", Input).value.strip()
+        if not text.isdecimal() or int(text) <= 0:
+            self.status("请输入有效的正整数比赛 ID。")
+            return
+        cid = int(text)
+        if not any(c["contestId"] == cid for c in self.remote):
+            self.remote.append({"contestId": cid, "contestName": f"手动添加的比赛 #{cid}"})
+        self.load_contests()
+        self.choose(cid)
+        self.status(f"已打开比赛 #{cid}。按 c 采集，或 a 分析本地数据。")
+
+    def save_uid(self):
+        text = self.query_one("#uid-input", Input).value.strip()
+        if not text.isdecimal() or int(text) <= 0:
+            self.query_one("#login-message", Static).update("UID 必须是正整数，可从牛客用户主页地址获取。")
+            return
+        try:
+            write_secret(UID_PATH, text)
+            self.query_one("#login-message", Static).update("UID 已保存。")
+            self.action_refresh()
+        except Exception as e:
+            self.query_one("#login-message", Static).update(f"UID 保存失败：{e}")
 
     def cookie_help(self):
         self.query_one("#login-message", Static).update(
