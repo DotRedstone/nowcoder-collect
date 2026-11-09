@@ -826,15 +826,29 @@ class ReviewApp(App):
             self.status("采集前需要登录。")
             return
         self.running = True
+        self._job_kind = "collect" if collect else "analyze"
+        self._progress = "启动中"
         self.cancel_requested = False
         self.status(f"比赛 #{self.contest}：{'采集并分析' if collect else '离线分析'}启动中…")
         self.job_worker(self.contest, collect)
+
+    def update_progress(self, line: str) -> None:
+        """Only interpret real scraper counters; other messages stay textual."""
+        m = re.search(r"^\s*(\d+)/(\d+)\s*$", line)
+        if m:
+            done, total = int(m.group(1)), int(m.group(2))
+            if total > 0:
+                self._progress = f"{done}/{total} {min(100, int(done / total * 100))}%"
+        elif "检测" in line or "分析" in line:
+            self._progress = "检测中"
+        self.update_statusline()
 
     def action_cancel_task(self):
         if not self.running:
             self.status("没有运行中的任务。")
             return
         self.cancel_requested = True
+        self._progress = "取消中"
         proc = self.proc
         if proc is not None and proc.poll() is None: proc.terminate()
         self.status("已请求取消任务…")
@@ -853,7 +867,9 @@ class ReviewApp(App):
                     if self.cancel_requested:
                         proc.terminate()
                         break
-                    if line.strip(): self.call_from_thread(self.status, f"采集 #{cid} · {line.strip()[:160]}")
+                    if line.strip():
+                        self.call_from_thread(self.update_progress, line.strip())
+                        self.call_from_thread(self.status, f"采集 #{cid} · {line.strip()[:160]}")
                 output = proc.stdout.read()
                 proc.wait()
                 self.proc = None
@@ -864,6 +880,7 @@ class ReviewApp(App):
                         raise RuntimeError("采集未返回成功标记")
                 except (ValueError, IndexError) as e:
                     raise RuntimeError(f"采集输出无效：{e}") from e
+                self.call_from_thread(self.update_progress, "检测中")
                 self.call_from_thread(self.status, "采集完成，开始检测…")
             if self.cancel_requested: raise InterruptedError("任务已取消")
             proc = subprocess.Popen(
@@ -883,6 +900,7 @@ class ReviewApp(App):
 
     def job_done(self, cid, report, error):
         self.running = False
+        self._progress = ""
         self.cancel_requested = False
         if error:
             self.status(f"任务失败或取消：{error}")
