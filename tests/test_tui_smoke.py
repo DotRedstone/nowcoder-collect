@@ -20,7 +20,7 @@ class SmokeTests(unittest.TestCase):
                     self.assertIsNotNone(app.query_one("#evidence"))
                     app.action_help()
                     await pilot.pause()
-                    self.assertIn("Tab", str(app.query_one("#status").render()))
+                    self.assertIn("1/2/3 panes", str(app.query_one("#status").render()))
         asyncio.run(run())
 
     def test_review_navigation_with_mock_data(self):
@@ -41,6 +41,14 @@ class SmokeTests(unittest.TestCase):
                         self.assertTrue(app.login_visible)
                         app.action_back()
                         self.assertFalse(app.login_visible)
+                        app.focus_pane(1)
+                        self.assertEqual(app.active_pane, 1)
+                        app.action_filter()
+                        self.assertEqual(app.filter_idx, 1)
+                        app.execute_command("contest 456")
+                        self.assertEqual(app.contest, 456)
+                        app.execute_command("theme ansi-dark")
+                        self.assertEqual(app.theme, "ansi-dark")
         asyncio.run(run())
 
 
