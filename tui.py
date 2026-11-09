@@ -113,22 +113,25 @@ class Tui:
             curses.curs_set(0)
         except curses.error:
             pass  # 部分终端不支持隐藏光标
-        # 颜色初始化必须 start_color 先行；-1 默认背景需 use_default_colors
+        # 颜色初始化：start_color 先行；-1 默认背景需 use_default_colors；
+        # 无颜色终端（COLORS=0）/ use_default_colors 失败时整体降级，绝不崩
         try:
-            curses.start_color()
-            try:
-                curses.use_default_colors()
-                bg = -1
-            except curses.error:
+            if curses.has_colors():
+                curses.start_color()
                 bg = curses.COLOR_BLACK
-            curses.init_pair(1, curses.COLOR_RED, bg)
-            curses.init_pair(2, curses.COLOR_YELLOW, bg)
-            curses.init_pair(3, curses.COLOR_CYAN, bg)
-            curses.init_pair(4, curses.COLOR_WHITE, bg)
-            curses.init_pair(5, curses.COLOR_GREEN, bg)
-            curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_WHITE)
-        except curses.error:
-            pass  # 无颜色终端，忽略
+                try:
+                    curses.use_default_colors()
+                    bg = -1
+                except Exception:
+                    bg = curses.COLOR_BLACK
+                curses.init_pair(1, curses.COLOR_RED, bg)
+                curses.init_pair(2, curses.COLOR_YELLOW, bg)
+                curses.init_pair(3, curses.COLOR_CYAN, bg)
+                curses.init_pair(4, curses.COLOR_WHITE, bg)
+                curses.init_pair(5, curses.COLOR_GREEN, bg)
+                curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_WHITE)
+        except Exception:
+            pass  # 任何颜色异常都降级为无颜色，不影响功能
 
         self.cookie = read_cookie()
         self.uid = read_uid()
