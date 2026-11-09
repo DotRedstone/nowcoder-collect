@@ -32,9 +32,31 @@ python -m pip install -r requirements-tui.txt
 
 快速键：`1/2/3` 切比赛、线索、审查窗格；`j/k` 或方向键移动；`/` 搜索、`f` 循环过滤、`:` 打开命令模式；`a` 离线分析、`c` 采集并分析、`r` 在线刷新；`i` 输入比赛 ID、`l` 登录、`s` 扫码；`x` 标记已核查、`d` 无需跟进、`!` 需进一步核实；`t` 切换主题、`Ctrl+X` 取消后台任务、`?` 帮助、`q` 退出。
 
-界面采用紧凑终端视觉：默认优先使用 ANSI 配色以适配终端主题，`t` 可循环切换内置主题，也可 `NOWCODER_THEME=gruvbox ./run.sh` 或 `NOWCODER_THEME=nord ./run.sh`。支持 `:theme ansi-dark`、`:contest 143786`、`:analyze`、`:collect` 等命令。窄屏自动使用单窗格，使用数字键在窗格间导航；中等宽度自动保留比赛与线索双栏。
+界面采用紧凑的 Linux rice 风格：圆角窗格标题和副标题显示筛选结果数；焦点边框与强调色绑定；风险等级按红 / 黄 / 灰提示，复核状态单独着色。底部是单行 lualine 风格状态栏，包含 NORMAL/COMMAND/COLLECT 模式、当前比赛和窗格、主题、时间与采集进度。`?` 弹出完整按键说明，不常驻第二条快捷键栏。
 
-首次登录：点击“账户 / 扫码” → “开始扫码”并用微信确认；Cookie 存于 `~/.dsh/nowcoder/cookie.txt`。在线最近比赛列表还需要用户 UID，可在账户页面填写（从牛客个人主页地址获取），保存在 `~/.dsh/nowcoder/uid.txt`。请勿提交 Cookie、UID 或私人审查记录。
+### 主题、Nerd Font 与壁纸联动
+
+默认 `auto`：优先读取 `~/.cache/wal/colors.json`（pywal），其次尝试 `~/.cache/matugen/colors.json`、`~/.config/matugen/colors.json`；都没有就回退到 `ansi-dark`。**matugen 没有固定的 JSON 输出位置**，所以如果你通过 matugen 模板生成 JSON，最可靠的是设置 `NOWCODER_THEME_FILE` 指向该文件。仅解析 JSON 色值，不运行外部脚本或 shell。
+
+运行时每 4 秒检查一次配色文件是否变更（`auto`/ `wallpaper` 模式），更新壁纸后通常无需重启。可用 `:theme auto` 重新读取，或用 `:theme gruvbox` 固定主题（固定主题不会跟随壁纸）。`t` 在内置和已注册的壁纸主题间切换。
+
+在 **Fish Shell** 中使用：
+
+```fish
+# 有 pywal 或 matugen JSON 时自动跟随
+set -lx NOWCODER_THEME auto
+set -lx NOWCODER_THEME_FILE ~/.cache/wal/colors.json
+
+# Nerd Font 可用时启用 powerline glyph；缺字形就不设置
+set -lx NOWCODER_NERD_FONT 1
+./run.sh
+```
+
+无 Nerd Font 默认使用 `▌` 作为分隔符，避免乱码。预置主题也可用 `NOWCODER_THEME=nord ./run.sh`。其他命令包括 `:contest 143786`、`:analyze`、`:collect`。
+
+窄屏为单窗格，使用 `1/2/3` 切换；中等宽度显示两个窗格，当前在审查窗格时显示“线索 + 审查”。
+
+首次登录：按 `l` 打开登录页，按 `s` 扫码并用微信确认；Cookie 存于 `~/.dsh/nowcoder/cookie.txt`。在线最近比赛列表还需要用户 UID，可在账户页面填写（从牛客个人主页地址获取），保存在 `~/.dsh/nowcoder/uid.txt`。请勿提交 Cookie、UID 或私人审查记录。
 
 数据库：`~/.dsh/nowcoder/nowcoder.db`；采集输出：`~/nowcoder-data/<比赛ID>/`。旧数据格式保持兼容。
 
