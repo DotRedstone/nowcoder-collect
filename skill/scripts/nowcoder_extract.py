@@ -2,35 +2,34 @@
 # -*- coding: utf-8 -*-
 """牛客网 ACM 比赛代码提取器 —— DSH skill `nowcoder-collect` 的配套脚本。
 
-从 ac.nowcoder.com 拉取某场比赛的提交与代码，按学生/题号落盘，并写入 SQLite 数据库。
+从 ac.nowcoder.com 拉取比赛全部提交与代码，按学生/题号落盘，并写入 SQLite 数据库。
 
 真实接口（2026-11 实测）：
   最近参加的比赛: GET /acm-heavy/acm/contest/profile/contest-joined-history
-                   ?uid={uid}&page=1&pageSize=30&onlyJoinedFilter=true
-                   &searchContestName=&onlyRatingFilter=false&contestEndFilter=true
+                   ?uid={uid}&page=1&pageSize=30&onlyJoinedFilter=true&contestEndFilter=true
   比赛信息(JSON):  GET /acm/contest/contest-info?id={contestId}
                    -> data.name / data.startTime / data.endTime
-  提交列表(JSON):  GET /acm/contest/status-list?token=&id={contestId}&page={n}&pageSize=50
-                   -> data.data[]（userName/userId/index 题号/languageName/statusMessage/
-                      submissionId/problemId/score/submitTime），basicInfo.pageCount/statusCount 翻页
+  榜单完整数据:    GET /acm/contest/rank/submit-list?currentContestId={id}&contestList={id}&rankScope=ALL
+                   -> data.problemData[]（index 题号/score 满分/title 标题/problemId）
+                   -> data.submitDataList[0].signUpUsers[]（uid/name/school/violation）
+                   -> data.submitDataList[0].submissions[]（uid/problemId/submissionId/
+                      submitTime/status/rightCaseRate/timeConsumption）
+                   ※ 这是「比赛期间」的完整提交（#rank 前端就靠它客户端算榜）
+  提交记录(JSON):  GET /acm/contest/status-list?token=&id={contestId}&page={n}&pageSize=50
+                   ※ 只返回部分（含补题），仅用于补题采集，不作为主源
   代码页(HTML):    GET /acm/contest/view-submission?submissionId={id}
-                   -> 代码在 <pre class="prettyprint lang-xxx">…</pre>（HTML 转义）
-
-注意：status-list 会返回「比赛期间 + 赛后补题」的全部提交，本脚本默认按
-比赛窗口（startTime <= submitTime <= endTime）过滤，只保留比赛期间提交。
-用 --phase 切换：contest(默认,仅比赛期间) / after(仅补题) / all(全部)。
+                   -> 代码在 <pre class="prettyprint lang-xxx">；语言/运行状态/得分在 .coder-cont-legend
 
 用法:
   python3 nowcoder_extract.py --recent [--uid <数字id>]
-  python3 nowcoder_extract.py --contest 143786 [--name "..." ] [--phase contest] [--out ./data]
-  python3 nowcoder_extract.py --contest 143786 --phase all      # 含补题
-  python3 nowcoder_extract.py --query "select count(*) from submissions where contest_id=143786"  # 查库
+  python3 nowcoder_extract.py --rank 143786                 # 重建榜单（IOI 总分）
+  python3 nowcoder_extract.py --contest 143786 [--phase contest|after|all]
+  python3 nowcoder_extract.py --query "select ..."
 
 Cookie 来源优先级: --cookie > NOWCODER_COOKIE > ~/.dsh/nowcoder/cookie.txt
 """
 import argparse
 import datetime
-import hashlib
 import html as htmlmod
 import json
 import os
@@ -38,6 +37,7 @@ import re
 import sqlite3
 import sys
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BASE = "https://ac.nowcoder.com"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -107,8 +107,22 @@ def fetch_contest_info(cookie, contest_id):
     }
 
 
-# ---------------------------------------------------------------- 提取
-def fetch_submissions(cookie, contest_id):
+# ---------------------------------------------------------------- 榜单完整数据
+def fetch_submit_list(cookie, contest_id):
+    """榜单真实数据源：报名用户 + 全部比赛期间提交。"""
+    url = f"{BASE}/acm/contest/rank/submit-list?currentContestId={contest_id}&contestList={contest_id}&rankScope=ALL"
+    d = get_json(url, cookie)
+    data = d.get("data") or {}
+    problems = data.get("problemData") or []       # {score(满分), index, problemId, title}
+    sdl = (data.get("submitDataList") or [{}])[0]
+    signup = {u["uid"]: u for u in (sdl.get("signUpUsers") or [])}
+    submissions = sdl.get("submissions") or []
+    basic = sdl.get("basicInfo") or {}
+    return problems, signup, submissions, basic
+
+
+# ---------------------------------------------------------------- 提交记录（补题用）
+def fetch_status_list(cookie, contest_id):
     subs = []
     first = get_json(f"{BASE}/acm/contest/status-list?token=&id={contest_id}&page=1&pageSize=50", cookie)
     data = first.get("data") or {}
@@ -121,65 +135,32 @@ def fetch_submissions(cookie, contest_id):
     return subs
 
 
-def fetch_problem_data(cookie, contest_id):
-    """榜单接口的 problemData（题号 + 满分）与 basicInfo（比赛窗口等）。"""
-    d = get_json(f"{BASE}/acm/contest/real-time-rank-data?token=&id={contest_id}&page=1", cookie)
-    data = d.get("data") or {}
-    return data.get("problemData") or [], data.get("basicInfo") or {}
+# ---------------------------------------------------------------- 代码页解析
+def extract_code_page(html):
+    """从 view-submission HTML 提取 code/language/verdict/score。"""
+    code = ""
+    m = re.search(r'<pre[^>]*class="prettyprint[^"]*"[^>]*>([\s\S]*?)</pre>', html)
+    if m:
+        code = htmlmod.unescape(m.group(1)).strip()
+    m = re.search(r'<div class="coder-cont-legend">([\s\S]*?)</div>', html)
+    legend = m.group(1) if m else ""
+
+    def pick(pattern):
+        mm = re.search(pattern, legend)
+        return mm.group(1).strip() if mm else ""
+
+    lang = pick(r'语言[:：]\s*([^<>\n]+)')
+    verdict = pick(r'运行状态[:：]\s*<[^>]*>\s*([^<>\n]+)')
+    score = pick(r'得分[:：]\s*<[^>]*>\s*([\d.]+)')
+    return code, lang, verdict, score
 
 
-def compute_rank(cookie, contest_id, phase):
-    """用提交数据重建榜单：每人在每题取最高分，按总分降序。"""
-    problems, basic = fetch_problem_data(cookie, contest_id)
-    start, end = basic.get("contestBeginTime"), basic.get("contestEndTime")
-    subs = fetch_submissions(cookie, contest_id)
-    sel = [s for s in subs if phase == "all" or phase_of(s.get("submitTime"), start, end) == phase]
-    students = {}
-    for s in sel:
-        sid = s.get("userId")
-        stu = students.setdefault(sid, {"name": s.get("userName") or "", "best": {}, "submissions": 0, "ac": 0})
-        stu["submissions"] += 1
-        idx = s.get("index") or ""
-        sc = s.get("score") or 0
-        if idx:
-            stu["best"][idx] = max(stu["best"].get(idx, 0), sc)
-        if s.get("statusMessage") in ("答案正确", "Accepted", "通过"):
-            stu["ac"] += 1
-    for stu in students.values():
-        stu["total"] = round(sum(stu["best"].values()), 2)
-    ranked = sorted(students.values(), key=lambda s: (-s["total"], -s["ac"], s["name"]))
-    return problems, ranked
-
-
-def rank_table_md(problems, ranked, phase_label):
-    phase_txt = {"contest": "比赛期间", "after": "补题", "all": "全部"}.get(phase_label, phase_label)
-    names = [p["name"] for p in problems]
-    L = ["# 比赛榜单（重建）", ""]
-    L.append(f"- 排名范围：{phase_txt}")
-    L.append(f"- 参与人数：{len(ranked)}")
-    L.append("- 规则：IOI 计分，每人在每题取最高分求和，按总分降序")
-    L.append("")
-    L.append("| 排名 | 姓名 | 总分 | AC | " + " | ".join(names) + " | 提交 |")
-    L.append("| --- | --- | --- | --- | " + " | ".join("---" for _ in names) + " | --- |")
-    for i, stu in enumerate(ranked, 1):
-        cells = [str(i), stu["name"], f"{stu['total']:.1f}", str(stu["ac"])]
-        for nm in names:
-            v = stu["best"].get(nm)
-            cells.append(f"{v:.1f}" if v is not None else "—")
-        cells.append(str(stu["submissions"]))
-        L.append("| " + " | ".join(cells) + " |")
-    return "\n".join(L)
-
-
-def fetch_code(cookie, submission_id):
+def fetch_code_full(cookie, submission_id):
     try:
         page = get(f"{BASE}/acm/contest/view-submission?submissionId={submission_id}", cookie)
-        m = re.search(r'<pre[^>]*class="prettyprint[^"]*"[^>]*>([\s\S]*?)</pre>', page)
-        if m:
-            return htmlmod.unescape(m.group(1)).strip()
+        return extract_code_page(page)
     except Exception:
-        pass
-    return ""
+        return "", "", "", ""
 
 
 def ext_for_lang(lang):
@@ -252,16 +233,6 @@ def code_metrics(code):
     return {"loc": loc, "comments": comments, "blanks": blanks, "ratio": round(ratio, 3)}
 
 
-def phase_of(submit_time, start, end):
-    if submit_time is None:
-        return "unknown"
-    if start and submit_time < start:
-        return "before"
-    if end and submit_time > end:
-        return "after"
-    return "contest"
-
-
 # ---------------------------------------------------------------- 相似度
 def _norm(code):
     return re.sub(r"\s+", "",
@@ -303,7 +274,6 @@ def build_similarity(items):
         for j in range(i + 1, len(fps)):
             a, fa = fps[i]
             b, fb = fps[j]
-            # 只比较「不同人 + 同一题」：跨人同题才是抄袭线索，重交/不同题无意义
             if a["studentId"] == b["studentId"]:
                 continue
             if a["problemIndex"] != b["problemIndex"]:
@@ -365,19 +335,17 @@ def init_db(db_path):
         student_id    INTEGER,
         problem_index TEXT,
         problem_id    INTEGER,
+        problem_title TEXT,
         language      TEXT,
         verdict       TEXT,
         score         REAL,
         submit_time   INTEGER,
-        run_time      INTEGER,
-        memory        INTEGER,
-        length        INTEGER,
-        loc           INTEGER,
-        comments      INTEGER,
-        comment_ratio REAL,
         phase         TEXT,
         code          TEXT,
         url           TEXT,
+        loc           INTEGER,
+        comments      INTEGER,
+        comment_ratio REAL,
         extracted_at  TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_sub_contest ON submissions(contest_id);
@@ -394,103 +362,172 @@ def upsert_contest(con, info):
                  info.get("endTime"), info.get("description", "")))
 
 
-def upsert_submission(con, it, contest_id, phase):
+def upsert_submission(con, it, contest_id):
     con.execute("""INSERT OR REPLACE INTO submissions
         (submission_id, contest_id, student, student_id, problem_index, problem_id,
-         language, verdict, score, submit_time, run_time, memory, length,
-         loc, comments, comment_ratio, phase, code, url, extracted_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         problem_title, language, verdict, score, submit_time, phase, code, url,
+         loc, comments, comment_ratio, extracted_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (it["submissionId"], contest_id, it["student"], it["studentId"],
-                 it["problemIndex"], it["problemId"], it["language"], it["verdict"],
-                 it["score"], it["submitTime"], it["time"], it["memory"], it["length"],
+                 it["problemIndex"], it["problemId"], it["problem"],
+                 it["language"], it["verdict"], it["score"], it["submitTime"],
+                 it["phase"], it["code"], it["url"],
                  it["metrics"]["loc"], it["metrics"]["comments"], it["metrics"]["ratio"],
-                 phase, it["code"], it["url"], it["extractedAt"]))
+                 it["extractedAt"]))
+
+
+# ---------------------------------------------------------------- 榜单重建
+def compute_rank(cookie, contest_id, phase):
+    problems, signup, submissions, basic = fetch_submit_list(cookie, contest_id)
+    full = {p["problemId"]: p["score"] for p in problems}
+    order = [p["index"] for p in problems]
+    best = {uid: {} for uid in signup}       # 全部报名用户（含 0 提交）
+    cnt = {uid: 0 for uid in signup}
+    for s in submissions:
+        uid = s["uid"]
+        pid = s["problemId"]
+        if s["status"] == 5:                 # 答案正确 -> 满分
+            sc = full.get(pid, 0)
+        else:                                # 部分分 -> rightCaseRate * 满分
+            sc = round(s.get("rightCaseRate", 0) * full.get(pid, 0), 2)
+        best.setdefault(uid, {})
+        best[uid][pid] = max(best[uid].get(pid, 0), sc)
+        cnt[uid] = cnt.get(uid, 0) + 1
+    ranked = []
+    for uid, b in best.items():
+        total = round(sum(b.values()), 2)
+        ac = sum(1 for pid, sc in b.items() if sc >= full.get(pid, 0) - 1e-6)
+        u = signup.get(uid, {})
+        by_index = {next((p["index"] for p in problems if p["problemId"] == pid), str(pid)): sc
+                    for pid, sc in b.items()}
+        ranked.append({"name": u.get("name") or str(uid), "total": total, "ac": ac,
+                       "submissions": cnt.get(uid, 0), "best": by_index,
+                       "violation": u.get("violation", False)})
+    ranked.sort(key=lambda s: (-s["total"], -s["ac"], s["name"]))
+    prob_for_table = [{"name": p["index"], "score": p["score"], "title": p.get("title", "")} for p in problems]
+    return prob_for_table, ranked
+
+
+def rank_table_md(problems, ranked, phase_label):
+    phase_txt = {"contest": "比赛期间", "after": "补题", "all": "全部"}.get(phase_label, phase_label)
+    names = [p["name"] for p in problems]
+    L = ["# 比赛榜单（官方同源重建）", ""]
+    L.append(f"- 排名范围：{phase_txt}")
+    L.append(f"- 人数：{len(ranked)}")
+    L.append("- 规则：IOI 计分，每题取最高分（AC 得满分，否则 rightCaseRate×满分），按总分降序")
+    L.append("")
+    # 题号 + 满分 + 标题提示
+    L.append("题号满分：" + "　".join(f"{p['name']}={p['score']}" for p in problems))
+    L.append("")
+    L.append("| 排名 | 姓名 | 总分 | AC | " + " | ".join(names) + " | 提交 |")
+    L.append("| --- | --- | --- | --- | " + " | ".join("---" for _ in names) + " | --- |")
+    for i, stu in enumerate(ranked, 1):
+        cells = [str(i), stu["name"] + ("⚠️" if stu.get("violation") else ""), f"{stu['total']:.2f}", str(stu["ac"])]
+        for nm in names:
+            v = stu["best"].get(nm)
+            cells.append(f"{v:.2f}" if v is not None else "—")
+        cells.append(str(stu["submissions"]))
+        L.append("| " + " | ".join(cells) + " |")
+    return "\n".join(L)
 
 
 # ---------------------------------------------------------------- 主流程
-def extract(cookie, contest_id, out_dir, phase, db_path):
-    print(f"[1/5] 拉取比赛信息 contest={contest_id} …", file=sys.stderr)
+def extract(cookie, contest_id, out_dir, phase, db_path, threads):
+    print(f"[1/5] 拉取比赛信息与榜单数据 contest={contest_id} …", file=sys.stderr)
     info = fetch_contest_info(cookie, contest_id)
     name = info.get("name") or str(contest_id)
     start, end = info.get("startTime"), info.get("endTime")
-    if start and end:
-        print(f"      比赛: {name}  窗口 {time_str(start)} ~ {time_str(end)}", file=sys.stderr)
+    problems, signup, rank_subs, rank_basic = fetch_submit_list(cookie, contest_id)
+    prob_by_id = {p["problemId"]: p for p in problems}
+    print(f"      比赛: {name}  窗口 {time_str(start)} ~ {time_str(end)}", file=sys.stderr)
+    print(f"      榜单提交(比赛期间): {len(rank_subs)} 条，报名 {len(signup)} 人", file=sys.stderr)
 
-    print(f"[2/5] 拉取提交列表 …", file=sys.stderr)
-    subs = fetch_submissions(cookie, contest_id)
-    if not subs:
-        print("该比赛没有提交记录（或比赛 ID 不对 / 未参赛）", file=sys.stderr)
-        return 1
+    # 补题（status-list 过滤 > endTime）
+    after_subs = []
+    if phase in ("after", "all"):
+        status_list = fetch_status_list(cookie, contest_id)
+        after_subs = [s for s in status_list if end and s.get("submitTime") and s["submitTime"] > end]
+        print(f"      补题提交: {len(after_subs)} 条", file=sys.stderr)
 
-    # 按比赛窗口分阶段 + 过滤
-    phased = []
-    for s in subs:
-        st = s.get("submitTime")
-        phased.append((s, phase_of(st, start, end)))
-    keep_phase = phase
-    sel = [s for s, ph in phased if (keep_phase == "all" or ph == keep_phase)]
-    n_contest = sum(1 for _, ph in phased if ph == "contest")
-    n_after = sum(1 for _, ph in phased if ph == "after")
-    print(f"      共 {len(subs)} 条：比赛期间 {n_contest}，赛后补题 {n_after}"
-          f"，本阶段采集 {len(sel)}（--phase {phase}）", file=sys.stderr)
+    # 统一提交清单
+    raw = []  # {submissionId, student, studentId, problemIndex, problem, submitTime, phase}
+    seen = set()
+    def add(submissionId, student, studentId, pidx, title, submitTime, ph):
+        if not submissionId or submissionId in seen:
+            return
+        seen.add(submissionId)
+        raw.append({"submissionId": submissionId, "student": student, "studentId": studentId,
+                    "problemIndex": pidx, "problem": title, "submitTime": submitTime, "phase": ph})
 
-    print(f"[3/5] 抓取代码（{len(sel)} 条）…", file=sys.stderr)
-    items = []
-    for idx, (s, ph) in enumerate(phased):
-        if keep_phase != "all" and ph != keep_phase:
-            continue
-        code = fetch_code(cookie, s.get("submissionId"))
+    if phase in ("contest", "all"):
+        for s in rank_subs:
+            p = prob_by_id.get(s["problemId"], {})
+            u = signup.get(s["uid"], {})
+            add(s["submissionId"], u.get("name", ""), s["uid"],
+                p.get("index", ""), p.get("title", ""), s["submitTime"], "contest")
+    for s in after_subs:
+        add(s.get("submissionId"), s.get("userName", ""), s.get("userId"),
+            s.get("index", ""), "", s.get("submitTime"), "after")
+
+    n_contest = len([r for r in raw if r["phase"] == "contest"])
+    n_after = len([r for r in raw if r["phase"] == "after"])
+    print(f"[2/5] 本阶段采集 {len(raw)} 条（比赛期间 {n_contest}，补题 {n_after}）", file=sys.stderr)
+
+    print(f"[3/5] 抓取代码（并发 {threads} 线程）…", file=sys.stderr)
+
+    def build_item(r):
+        code, lang, verdict, score = fetch_code_full(cookie, r["submissionId"])
         it = {
-            "submissionId": s.get("submissionId"),
-            "student": s.get("userName") or "",
-            "studentId": s.get("userId"),
-            "problemIndex": s.get("index") or "",
-            "problemId": s.get("problemId"),
-            "language": s.get("languageName") or s.get("languageCategoryName") or "",
-            "verdict": s.get("statusMessage") or "",
-            "score": s.get("score"),
-            "submitTime": s.get("submitTime"),
-            "time": s.get("time"),
-            "memory": s.get("memory"),
-            "length": s.get("length"),
-            "phase": ph,
+            "submissionId": r["submissionId"],
+            "student": r["student"],
+            "studentId": r["studentId"],
+            "problemIndex": r["problemIndex"],
+            "problem": r["problem"],
+            "problemId": next((p["problemId"] for p in problems if p["index"] == r["problemIndex"]), None),
+            "language": lang,
+            "verdict": verdict,
+            "score": score,
+            "submitTime": r["submitTime"],
+            "phase": r["phase"],
             "code": code,
-            "url": f"{BASE}/acm/contest/view-submission?submissionId={s.get('submissionId')}",
+            "url": f"{BASE}/acm/contest/view-submission?submissionId={r['submissionId']}",
             "extractedAt": time_str(int(datetime.datetime.now().timestamp() * 1000)),
         }
         it["metrics"] = code_metrics(code)
-        items.append(it)
-        if (idx + 1) % 10 == 0:
-            print(f"      {idx + 1}/{len(subs)}", file=sys.stderr)
+        return it
+
+    items = [None] * len(raw)
+    with ThreadPoolExecutor(max_workers=threads) as pool:
+        fut_map = {pool.submit(build_item, r): i for i, r in enumerate(raw)}
+        done = 0
+        for fut in as_completed(fut_map):
+            items[fut_map[fut]] = fut.result()
+            done += 1
+            if done % 20 == 0 or done == len(raw):
+                print(f"      {done}/{len(raw)}", file=sys.stderr)
 
     ok = sum(1 for it in items if it["code"])
     print(f"[4/5] 写数据库 + 导出 …", file=sys.stderr)
 
-    # SQLite
     db_path = db_path or os.path.expanduser("~/.dsh/nowcoder/nowcoder.db")
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     con = init_db(db_path)
     upsert_contest(con, info)
     for it in items:
-        upsert_submission(con, it, contest_id, it["phase"])
+        upsert_submission(con, it, contest_id)
     con.commit()
     con.close()
 
-    # 导出文件
     base = os.path.join(out_dir, str(contest_id))
     code_dir = os.path.join(base, "code")
     os.makedirs(code_dir, exist_ok=True)
 
     manifest = {
-        "contestId": contest_id,
-        "contestName": name,
-        "startTime": start,
-        "endTime": end,
-        "phase": phase,
-        "totalRaw": len(subs),
-        "inContest": n_contest,
-        "afterContest": n_after,
-        "selected": len(items),
+        "contestId": contest_id, "contestName": name,
+        "startTime": start, "endTime": end, "phase": phase,
+        "signUpUsers": len(signup),
+        "inContest": n_contest, "afterContest": n_after,
+        "selected": len(items), "extracted": ok,
         "extractedAt": time_str(int(datetime.datetime.now().timestamp() * 1000)),
         "submissions": [{k: v for k, v in it.items() if k != "code"} for it in items],
     }
@@ -514,11 +551,12 @@ def extract(cookie, contest_id, out_dir, phase, db_path):
     md.append(f"- 比赛：{name}（{contest_id}）")
     md.append(f"- 窗口：{time_str(start)} ~ {time_str(end)}" if start and end else "")
     md.append(f"- 采集范围：{'全部' if phase == 'all' else ('比赛期间' if phase == 'contest' else '赛后补题')}")
-    md.append(f"- 提交：{len(items)} 条（原始 {len(subs)} 条，比赛期间 {n_contest}，赛后 {n_after}）")
+    md.append(f"- 提交：{len(items)} 条（比赛期间 {n_contest}，补题 {n_after}）")
     md.append("")
     for it in sorted(items, key=lambda x: (x["student"], x["problemIndex"])):
+        title = f" {it['problem']}" if it.get("problem") else ""
         tag = " · ".join(filter(None, [it["language"], it["verdict"]]))
-        md.append(f"## {it['student'] or '未知'} — {it['problemIndex'] or it['submissionId']}"
+        md.append(f"## {it['student'] or '未知'} — {it['problemIndex'] or it['submissionId']}{title}"
                   + (f"（{tag}）" if tag else ""))
         if it["url"]:
             md.append(f"- 来源：{it['url']}")
@@ -573,10 +611,9 @@ def extract(cookie, contest_id, out_dir, phase, db_path):
 
     print(f"[5/5] 完成 → {base}  |  DB: {db_path}", file=sys.stderr)
     print(json.dumps({"ok": True, "contestId": contest_id, "name": name,
-                      "totalRaw": len(subs), "inContest": n_contest, "afterContest": n_after,
+                      "signUpUsers": len(signup), "inContest": n_contest, "afterContest": n_after,
                       "selected": len(items), "extracted": ok, "dir": base,
-                      "db": db_path, "similarityPairs": len(pairs)},
-                     ensure_ascii=False))
+                      "db": db_path, "similarityPairs": len(pairs)}, ensure_ascii=False))
     return 0
 
 
@@ -599,6 +636,7 @@ def main():
                     help="采集范围：contest=仅比赛期间(默认) after=仅补题 all=全部")
     ap.add_argument("--out", default="./nowcoder-data", help="输出根目录")
     ap.add_argument("--db", default="", help="SQLite 路径（缺省 ~/.dsh/nowcoder/nowcoder.db）")
+    ap.add_argument("--threads", type=int, default=24, help="并发抓取线程数（默认 24）")
     ap.add_argument("--query", help="对 SQLite 执行只读 SQL 后退出")
     ap.add_argument("--cookie", help="登录 Cookie 字符串")
     args = ap.parse_args()
@@ -626,7 +664,7 @@ def main():
         ap.print_help()
         return 2
 
-    return extract(cookie, args.contest, args.out, args.phase, args.db)
+    return extract(cookie, args.contest, args.out, args.phase, args.db, args.threads)
 
 
 if __name__ == "__main__":
