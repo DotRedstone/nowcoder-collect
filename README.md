@@ -1,40 +1,56 @@
-# nowcoder-collect
+# nowcoder-collect · 牛客代码收集与雷同检测
 
-收集牛客网 ACM 比赛（`ac.nowcoder.com`）的提交代码，用于训练队管理与代码审查（防 AI 代做 / 防抄袭）。提供两种形态：
+一个完整的 ACM 训练队工具：**登录 → 爬取比赛全部提交 → 去 LLM 化确定性雷同检测 → 结果/榜单**。用于训练队管理与代码审查（防 AI 代做 / 防抄袭）。
 
-- **DSH skill**（`skill/`）：给 [DSH](https://github.com/DeepSeekAI/dsh) agent 用的技能，一句话触发「导出 XX 比赛代码 / 看看最近参加的竞赛」。
-- **浏览器插件**（`browser-extension/`）：Chrome/Edge Manifest V3 扩展，网页端一键/批量采集（可选，独立可用）。
+## 核心组件（主体）
 
-核心能力：拉取某场比赛**全部提交 + 源码**，按学生/题号落盘，并自动生成**相似度报告**（跨人同题雷同检测）与**嫌疑排名**。
+| 组件 | 位置 | 作用 |
+| --- | --- | --- |
+| **爬取器** | `skill/scripts/nowcoder_extract.py` | 登录态抓取比赛全部提交 + 榜单，落 SQLite（多线程，纯标准库） |
+| **检测器** | `detector/` | 去 LLM 化确定性雷同检测：L1/L2/L3 归一化 + 稀有 n-gram + 时间线 + 规则分级 |
+| **TUI 面板** | `tui.py` | 一体化 curses 面板，一条命令跑完整个流程 |
+
+## 附加项（可选）
+
+| 组件 | 位置 | 作用 |
+| --- | --- | --- |
+| DSH skill | `skill/` | 给 [DSH](https://github.com/DeepSeekAI/dsh) agent 的技能封装（爬取 + 榜单） |
+| 浏览器插件 | `browser-extension/` | Chrome/Edge 网页端采集（独立可用） |
+
+## 快速开始
+
+```bash
+git clone https://github.com/DotRedstone/nowcoder-collect.git
+cd nowcoder-collect
+python3 tui.py            # 一体化面板：登录 → 选比赛 → 爬取 → 分析 → 结果/榜单
+python3 tui.py --check    # 非交互：校验登录并列出比赛
+```
+
+首次使用在面板里「更新 Cookie」粘贴牛客登录态（`~/.dsh/nowcoder/cookie.txt`）即可。
 
 ## 目录结构
 
 ```
 nowcoder-collect/
-├── skill/                        # DSH skill（主要）
-│   ├── SKILL.md                  # 技能说明 + 接口逆向记录
-│   └── scripts/
-│       └── nowcoder_extract.py   # 提取脚本（纯标准库，零依赖）
-├── browser-extension/            # 浏览器插件（可选）
-│   ├── manifest.json
-│   ├── background.js
-│   ├── content/
-│   └── popup/
-├── install.sh                    # 一键安装 skill
-├── detector/                     # 去 LLM 化的确定性雷同检测器（纯标准库）
+├── tui.py                        # ★ TUI 面板（主入口）
+├── detector/                     # ★ 去 LLM 化确定性雷同检测器
 │   ├── main.py                   #   python main.py --contest 143786
 │   ├── config.toml               #   阈值配置
 │   ├── detectors/                #   preprocess/normalize/similarity/template/timeline/classify
-│   └── tests/                    #   单元 + 回归测试
+│   ├── docs/design.md            #   内核设计文档（含参考文献）
+│   └── tests/                    #   单元 + 回归测试（22 个）
+├── skill/                        # 附加：DSH skill（爬取 + 榜单）
+│   ├── SKILL.md
+│   └── scripts/nowcoder_extract.py
+├── browser-extension/            # 附加：浏览器插件
+├── install.sh                    # 附加：一键安装 skill
 ├── LICENSE
 └── README.md
 ```
 
-## 安装
+## 附加：安装 DSH skill
 
-### DSH skill
-
-```bash
+（可选）把 `skill/` 软链为 DSH skill，供 DSH agent 调用「导出比赛代码 / 查榜单」：```bash
 git clone https://github.com/DotRedstone/nowcoder-collect.git
 cd nowcoder-collect
 ./install.sh    # 软链到 $DSH_HOME/skills/nowcoder-collect，skill-filesystem 自动发现
@@ -51,7 +67,9 @@ ln -s "$(pwd)/skill" ~/.dsh/skills/nowcoder-collect
 1. 打开 `chrome://extensions/`（Edge 为 `edge://extensions/`）
 2. 开启「开发者模式」→「加载已解压的扩展程序」→ 选择 `browser-extension/` 目录
 
-## 使用（skill）
+## 爬取器 CLI（skill/scripts/nowcoder_extract.py）
+
+（TUI 内部也是调它，可单独用）
 
 ```bash
 cd <repo>/skill
@@ -104,8 +122,8 @@ python3 tui.py --check    # 非交互：校验登录并列出比赛
 ```sql
 contests(contest_id, name, start_time, end_time, description)
 submissions(submission_id, contest_id, student, student_id, problem_index, problem_id,
-            language, verdict, score, submit_time, run_time, memory, length,
-            loc, comments, comment_ratio, phase, code, url, extracted_at)
+            problem_title, language, verdict, score, submit_time, phase,
+            code, url, loc, comments, comment_ratio, extracted_at)
 ```
 
 `phase` ∈ `contest`（比赛期间）/ `after`（补题）/ `before`。`--query` 可执行任意只读 SQL，例如按人查提交、按题查 AC 数、导出数据。
