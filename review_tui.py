@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import difflib
 import json
+from importlib.util import find_spec
 import os
 import re
 import sqlite3
@@ -183,19 +184,43 @@ class Page(Screen):
         self.query_one("#code").display = False
         self.query_one("#qr").display = False
 
-    def show_source(self, left: str, right: str, diff: str) -> None:
+    @staticmethod
+    def _code_syntax(widget: TextArea, raw_language: str) -> None:
+        """Best-effort syntax coloring with optional textual[syntax] parsers."""
+        if find_spec("tree_sitter") is None or find_spec("tree_sitter_languages") is None:
+            return
+        value = (raw_language or "").casefold()
+        language = None
+        if "python" in value or "pypy" in value: language = "python"
+        elif "c++" in value or "cpp" in value or "g++" in value: language = "cpp"
+        elif value in ("c", "gcc", "c11", "c99"): language = "c"
+        elif "java" in value and "script" not in value: language = "java"
+        elif "javascript" in value: language = "javascript"
+        elif "rust" in value: language = "rust"
+        try:
+            widget.language = language
+        except (ValueError, LookupError, RuntimeError):
+            widget.language = None
+
+    def show_source(self, left: str, right: str, diff: str,
+                    language_a: str = "", language_b: str = "") -> None:
         self.query_one("#list").display = False
         self.query_one("#source-pair").display = True
         self.query_one("#code").display = False
-        self.query_one("#source-a", TextArea).load_text(left)
-        self.query_one("#source-b", TextArea).load_text(right)
+        a, b = self.query_one("#source-a", TextArea), self.query_one("#source-b", TextArea)
+        self._code_syntax(a, language_a)
+        self._code_syntax(b, language_b)
+        a.load_text(left)
+        b.load_text(right)
         self.query_one("#source-diff", TextArea).load_text(diff)
 
-    def show_code(self, source: str) -> None:
+    def show_code(self, source: str, raw_language: str = "") -> None:
         self.query_one("#list").display = False
         self.query_one("#source-pair").display = False
-        self.query_one("#code", TextArea).display = True
-        self.query_one("#code", TextArea).load_text(source)
+        widget = self.query_one("#code", TextArea)
+        widget.display = True
+        self._code_syntax(widget, raw_language)
+        widget.load_text(source)
 
     def ask(self, action: str, placeholder: str, value: str = "") -> None:
         self.pending_input = action
@@ -614,7 +639,7 @@ class ReviewApp(App):
                     a["code"].splitlines(True), b["code"].splitlines(True),
                     fromfile=f"{a['student']} #{a.get('submission_id')}",
                     tofile=f"{b['student']} #{b.get('submission_id')}"))
-                page.show_source(a.get("code", ""), b.get("code", ""), diff or "文本完全相同")
+                page.show_source(a.get("code", ""), b.get("code", ""), diff or "文本完全相同", a.get("language", ""), b.get("language", ""))
             except (OSError, ValueError, KeyError) as e:
                 page.show_source("", "", "")
                 self.set_status(f"证据源码不可用：{e}")
@@ -782,7 +807,7 @@ class ReviewApp(App):
             f" · 得分 {sub.get('score', 0)} · {dt}\n"
             f"标记：{self.people.get(cid, int(sub.get('student_id') or 0)).get('mark', 'unreviewed')}"
             "   n/p 前后代码 · 方括号切换历史 · m 给人标记")
-        page.show_code(sub.get("code") or "（本次提交无本地源码）")
+        page.show_code(sub.get("code") or "（本次提交无本地源码）", sub.get("language") or "")
         self.update_statusline()
 
     def render_settings(self, page: Page) -> None:
