@@ -1,5 +1,6 @@
 """Headless Screen-stack and review flow tests (no network or private data)."""
 import asyncio
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -138,6 +139,35 @@ class ScreenTests(unittest.TestCase):
                     await pilot.pause()
                     self.assertEqual(app.screen.query_one("#source-pair").active, "tab-diff")
         asyncio.run(run())
+
+    def test_corrupt_database_shows_error_instead_of_crashing(self):
+        async def run():
+            with patch("review_tui.local_contests", side_effect=sqlite3.OperationalError("file is not a database")), patch(
+                "review_tui.read_secret", return_value=""
+            ):
+                app = ReviewApp()
+                async with app.run_test(size=(98, 32)) as pilot:
+                    await pilot.pause()
+                    self.assertEqual(app.screen.kind, "home")
+                    self.assertEqual(app.screen.query_one("#frame").border_title, "读取失败")
+                    self.assertIn("数据库", str(app.screen.query_one("#overview").render()))
+                    self.assertEqual(app.screen.query_one("#list").row_count, 0)
+        asyncio.run(run())
+
+    def test_running_job_refuses_to_save_settings(self):
+        async def run():
+            with patch("review_tui.local_contests", return_value=[]), patch(
+                "review_tui.read_secret", return_value=""
+            ):
+                app = ReviewApp()
+                async with app.run_test(size=(100, 32)) as pilot:
+                    await pilot.pause()
+                    app.running = True
+                    self.assertFalse(app.save_all())
+                    self.assertIn("后台任务", app._status)
+                    app.running = False
+        asyncio.run(run())
+
 
 
 if __name__ == "__main__":
