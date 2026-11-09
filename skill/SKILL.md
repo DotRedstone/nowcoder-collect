@@ -22,6 +22,10 @@ description: 收集牛客网 ACM 比赛（ac.nowcoder.com）的提交代码。�
 
 **审查比赛期间是否作弊时，务必用默认 `contest`**，否则补题会污染结论（补题时抄比赛答案 ≠ 比赛期间作弊）。
 
+## 关于榜单（#rank）
+
+官方 `#rank` 实时榜接口是 `/acm/contest/real-time-rank-data`；但出题人可关掉「赛后展示榜单」（`postContestRankEnabled=false`），此时 `rankData` 为空、`rankCount=0`，页面 `#rank` 看不到任何东西。用 `--rank` 从提交数据重建（按每题最高分求和，IOI 计分）。
+
 ## 前置：登录 Cookie
 
 接口需要用户浏览器登录态 Cookie（`NOWCODERUID`、`t`、`NOWCODERCLINETID` 等）。三个来源，优先级从高到低：
@@ -52,6 +56,9 @@ python3 scripts/nowcoder_extract.py --contest 143786 --phase after
 
 # 5) 查 SQLite（默认 ~/.dsh/nowcoder/nowcoder.db）
 python3 scripts/nowcoder_extract.py --query "select count(*) from submissions where contest_id=143786 and phase='contest'"
+
+# 6) 重建榜单（官方 #rank 赛后常被出题人隐藏 postContestRankEnabled=false，用提交数据重建）
+python3 scripts/nowcoder_extract.py --rank 143786
 ```
 
 输出（`<out>/<contestId>/`）：

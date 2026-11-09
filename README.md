@@ -63,6 +63,9 @@ python3 scripts/nowcoder_extract.py --contest 143786 --phase after
 
 # 查 SQLite 库
 python3 scripts/nowcoder_extract.py --query "select count(*) from submissions where contest_id=143786 and phase='contest'"
+
+# 重建榜单（官方 #rank 赛后常被隐藏，用提交数据按总分重建）
+python3 scripts/nowcoder_extract.py --rank 143786
 ```
 
 > ⚠️ 牛客 `status-list` 会返回「比赛期间 + 赛后补题」的全部提交。默认 `--phase contest` 只留比赛期间（按 `startTime <= submitTime <= endTime` 过滤），避免补题污染「比赛期间作弊」的判断。

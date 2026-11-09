@@ -121,6 +121,56 @@ def fetch_submissions(cookie, contest_id):
     return subs
 
 
+def fetch_problem_data(cookie, contest_id):
+    """榜单接口的 problemData（题号 + 满分）与 basicInfo（比赛窗口等）。"""
+    d = get_json(f"{BASE}/acm/contest/real-time-rank-data?token=&id={contest_id}&page=1", cookie)
+    data = d.get("data") or {}
+    return data.get("problemData") or [], data.get("basicInfo") or {}
+
+
+def compute_rank(cookie, contest_id, phase):
+    """用提交数据重建榜单：每人在每题取最高分，按总分降序。"""
+    problems, basic = fetch_problem_data(cookie, contest_id)
+    start, end = basic.get("contestBeginTime"), basic.get("contestEndTime")
+    subs = fetch_submissions(cookie, contest_id)
+    sel = [s for s in subs if phase == "all" or phase_of(s.get("submitTime"), start, end) == phase]
+    students = {}
+    for s in sel:
+        sid = s.get("userId")
+        stu = students.setdefault(sid, {"name": s.get("userName") or "", "best": {}, "submissions": 0, "ac": 0})
+        stu["submissions"] += 1
+        idx = s.get("index") or ""
+        sc = s.get("score") or 0
+        if idx:
+            stu["best"][idx] = max(stu["best"].get(idx, 0), sc)
+        if s.get("statusMessage") in ("答案正确", "Accepted", "通过"):
+            stu["ac"] += 1
+    for stu in students.values():
+        stu["total"] = round(sum(stu["best"].values()), 2)
+    ranked = sorted(students.values(), key=lambda s: (-s["total"], -s["ac"], s["name"]))
+    return problems, ranked
+
+
+def rank_table_md(problems, ranked, phase_label):
+    phase_txt = {"contest": "比赛期间", "after": "补题", "all": "全部"}.get(phase_label, phase_label)
+    names = [p["name"] for p in problems]
+    L = ["# 比赛榜单（重建）", ""]
+    L.append(f"- 排名范围：{phase_txt}")
+    L.append(f"- 参与人数：{len(ranked)}")
+    L.append("- 规则：IOI 计分，每人在每题取最高分求和，按总分降序")
+    L.append("")
+    L.append("| 排名 | 姓名 | 总分 | AC | " + " | ".join(names) + " | 提交 |")
+    L.append("| --- | --- | --- | --- | " + " | ".join("---" for _ in names) + " | --- |")
+    for i, stu in enumerate(ranked, 1):
+        cells = [str(i), stu["name"], f"{stu['total']:.1f}", str(stu["ac"])]
+        for nm in names:
+            v = stu["best"].get(nm)
+            cells.append(f"{v:.1f}" if v is not None else "—")
+        cells.append(str(stu["submissions"]))
+        L.append("| " + " | ".join(cells) + " |")
+    return "\n".join(L)
+
+
 def fetch_code(cookie, submission_id):
     try:
         page = get(f"{BASE}/acm/contest/view-submission?submissionId={submission_id}", cookie)
@@ -543,6 +593,7 @@ def main():
     ap = argparse.ArgumentParser(description="牛客网 ACM 代码提取器")
     ap.add_argument("--recent", action="store_true", help="列出最近参加的比赛")
     ap.add_argument("--contest", help="比赛 ID")
+    ap.add_argument("--rank", help="重建某场比赛的榜单（IOI 总分排名）")
     ap.add_argument("--uid", default="", help="牛客用户数字 ID（--recent 用，缺省读 NOWCODER_UID 或 ~/.dsh/nowcoder/uid.txt）")
     ap.add_argument("--phase", default="contest", choices=["contest", "after", "all"],
                     help="采集范围：contest=仅比赛期间(默认) after=仅补题 all=全部")
@@ -556,6 +607,11 @@ def main():
 
     if args.query:
         query_db(args.db, args.query)
+        return 0
+
+    if args.rank:
+        problems, ranked = compute_rank(cookie, args.rank, args.phase)
+        print(rank_table_md(problems, ranked, args.phase))
         return 0
 
     if args.recent:
